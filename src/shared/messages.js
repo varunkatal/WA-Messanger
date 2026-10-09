@@ -10,6 +10,13 @@ export const MSG = {
   OPEN_WHATSAPP: 'OPEN_WHATSAPP',
   LIST_CONTACTS: 'LIST_CONTACTS',
   LIST_GROUPS: 'LIST_GROUPS',
+  /** payload: one message part (see template.js buildParts), files with `dataUrl` added. */
+  SEND_TEST: 'SEND_TEST',
+  /** payload: {id} of a campaign already written to storage. */
+  CAMPAIGN_START: 'CAMPAIGN_START',
+  CAMPAIGN_PAUSE: 'CAMPAIGN_PAUSE',
+  CAMPAIGN_RESUME: 'CAMPAIGN_RESUME',
+  CAMPAIGN_STOP: 'CAMPAIGN_STOP',
 };
 
 /** Content script ⇄ bridge (window.postMessage). */
@@ -17,6 +24,9 @@ export const BRIDGE_CMD = {
   STATUS: 'status',
   LIST_CONTACTS: 'listContacts',
   LIST_GROUPS: 'listGroups',
+  CHECK_NUMBER: 'checkNumber',
+  SEND_TEXT: 'sendText',
+  SEND_FILE: 'sendFile',
 };
 
 export const SOURCE_EXT = 'WBS_EXT';

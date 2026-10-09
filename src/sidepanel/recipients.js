@@ -1,11 +1,12 @@
 /**
- * Recipients tab: paste/typed numbers, CSV/Excel import with column mapping,
- * contact and group pickers, and the final recipient list (persisted as a draft).
+ * Recipients section: a Numbers · Groups · Contacts · Lists switch (paste/typed
+ * numbers and CSV/Excel import, inline group and contact pickers, saved lists),
+ * and the selected recipients as removable chips (persisted as a draft).
  *
  * XLSX is the SheetJS global, loaded by a classic <script> in sidepanel.html.
  */
 import { MSG } from '../shared/messages.js';
-import { normalizePhone, splitNameAndPhone } from '../shared/phone.js';
+import { normalizePhone, parseNumberList } from '../shared/phone.js';
 import { KEYS, getLocal, setLocal } from '../shared/storage.js';
 import { log } from '../shared/config.js';
 import { sendToWhatsApp } from './whatsapp.js';
@@ -117,16 +118,13 @@ function showSummary(text, tone = 'ok') {
 
 /* ---------- Paste ---------- */
 
-function onPasteAdd() {
-  const text = $('rcp-paste').value;
-  const rows = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map(splitNameAndPhone);
+/** Adds whatever is in the paste box, then empties it. */
+function addFromPasteBox() {
+  const box = $('rcp-paste');
+  const rows = parseNumberList(box.value);
   if (!rows.length) return;
   commit(addRawRows(rows));
-  $('rcp-paste').value = '';
+  box.value = '';
 }
 
 /* ---------- File import ---------- */
@@ -258,46 +256,124 @@ function closeImport() {
   $('import-box').hidden = true;
 }
 
-/* ---------- Contact / group pickers ---------- */
+/* ---------- Source switch: Numbers · Groups · Contacts · Lists ---------- */
+
+/** @type {'numbers'|'groups'|'contacts'|'lists'} */
+let mode = 'numbers';
+/** Groups / contacts loaded from WhatsApp, once per panel session (↻ reloads). */
+const sources = { groups: null, contacts: null };
+/** Re-renders the visible picker list (e.g. after a recipient is removed), or null. */
+let refreshPicker = null;
+
+function setMode(next) {
+  mode = next;
+  document.querySelectorAll('.seg').forEach((b) => b.classList.toggle('active', b.dataset.mode === next));
+  const pane = next === 'groups' || next === 'contacts' ? 'pick' : next;
+  document.querySelectorAll('.pane').forEach((p) => { p.hidden = p.dataset.pane !== pane; });
+  refreshPicker = null;
+  if (pane === 'pick') showSource(next);
+}
+
+/** Shows a one-line message in place of the picker list. */
+function setPickerMessage(text) {
+  const p = document.createElement('p');
+  p.className = 'muted small';
+  p.textContent = text;
+  $('picker-list').replaceChildren(p);
+  $('picker-add').disabled = true;
+}
+
+/** WhatsApp groups → picker items carrying the recipient to add. */
+const groupItems = (groups) =>
+  groups
+    .map((g) => ({
+      label: g.name || 'Unnamed group',
+      sub: g.participantsCount != null ? `${g.participantsCount} members` : 'Group',
+      recipient: { key: `id:${g.id}`, kind: 'group', chatId: g.id, number: null, name: g.name, vars: { name: g.name } },
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+
+/** WhatsApp contacts → picker items. */
+const contactItems = (contacts) =>
+  contacts
+    .map((c) => ({
+      label: c.name || (c.number ? `+${c.number}` : c.id),
+      sub: c.number ? `+${c.number}` : 'Number hidden',
+      recipient: {
+        key: c.number ? `n:${c.number}` : `id:${c.id}`,
+        kind: 'contact',
+        chatId: c.id,
+        number: c.number,
+        name: c.name,
+        vars: { name: c.name },
+      },
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
 /**
- * Opens the picker overlay.
- * @param {string} title
- * @param {{id: string, label: string, sub: string}[]} items
- * @param {(ids: Set<string>) => void} onAdd
+ * Loads groups or contacts from WhatsApp (cached) and shows them in the picker.
+ * @param {'groups'|'contacts'} kind
+ * @param {boolean} [reload] ignore the cache
  */
-function openPicker(title, items, onAdd) {
-  const selected = new Set();
+async function showSource(kind, reload = false) {
+  $('picker-search').placeholder = kind === 'groups' ? 'Search groups by name…' : 'Search contacts…';
+  if (!sources[kind] || reload) {
+    setPickerMessage('Loading from WhatsApp…');
+    try {
+      const raw = await sendToWhatsApp(kind === 'groups' ? MSG.LIST_GROUPS : MSG.LIST_CONTACTS);
+      sources[kind] = kind === 'groups' ? groupItems(raw) : contactItems(raw);
+    } catch (err) {
+      if (mode === kind) setPickerMessage(err.message);
+      return;
+    }
+  }
+  if (mode === kind) showPicker(sources[kind]);
+}
+
+/**
+ * Renders the inline picker: search, select all, checkbox list, "Add N selected".
+ * Items already in the recipient list show as added.
+ * @param {{label: string, sub: string, recipient: Recipient}[]} items
+ */
+function showPicker(items) {
+  const selected = new Set(); // recipient keys
   const listEl = $('picker-list');
   const search = $('picker-search');
   const selectAll = $('picker-all');
   const addBtn = $('picker-add');
-
-  $('picker-title').textContent = title;
   search.value = '';
 
+  const added = () => new Set(state.list.map((r) => r.key));
   const visible = () => {
     const q = search.value.trim().toLowerCase();
     return q ? items.filter((it) => `${it.label} ${it.sub}`.toLowerCase().includes(q)) : items;
+  };
+  const selectable = () => {
+    const have = added();
+    return visible().filter((it) => !have.has(it.recipient.key));
   };
 
   const updateFooter = () => {
     addBtn.textContent = `Add ${selected.size} selected`;
     addBtn.disabled = selected.size === 0;
-    const vis = visible();
-    selectAll.checked = vis.length > 0 && vis.every((it) => selected.has(it.id));
+    const sel = selectable();
+    selectAll.checked = sel.length > 0 && sel.every((it) => selected.has(it.recipient.key));
   };
 
   const renderList = () => {
+    const have = added();
     const frag = document.createDocumentFragment();
     for (const it of visible()) {
+      const key = it.recipient.key;
+      const isAdded = have.has(key);
       const row = document.createElement('label');
-      row.className = 'picker-row';
+      row.className = `picker-row${isAdded ? ' picker-added' : ''}`;
       const cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = selected.has(it.id);
+      cb.checked = isAdded || selected.has(key);
+      cb.disabled = isAdded;
       cb.addEventListener('change', () => {
-        cb.checked ? selected.add(it.id) : selected.delete(it.id);
+        cb.checked ? selected.add(key) : selected.delete(key);
         updateFooter();
       });
       const text = document.createElement('span');
@@ -305,102 +381,83 @@ function openPicker(title, items, onAdd) {
       const label = document.createElement('span');
       label.textContent = it.label;
       const sub = document.createElement('small');
-      sub.textContent = it.sub;
+      sub.textContent = isAdded ? `${it.sub} · added` : it.sub;
       text.append(label, sub);
       row.append(cb, text);
       frag.append(row);
     }
     listEl.replaceChildren(frag);
-    if (!listEl.children.length) {
-      const empty = document.createElement('p');
-      empty.className = 'muted';
-      empty.textContent = items.length ? 'No matches.' : 'Nothing found.';
-      listEl.append(empty);
-    }
+    if (!listEl.children.length) setPickerMessage(items.length ? 'No matches.' : 'Nothing found.');
     updateFooter();
   };
 
   search.oninput = renderList;
   selectAll.onchange = () => {
-    for (const it of visible()) selectAll.checked ? selected.add(it.id) : selected.delete(it.id);
+    for (const it of selectable()) selectAll.checked ? selected.add(it.recipient.key) : selected.delete(it.recipient.key);
     renderList();
   };
   addBtn.onclick = () => {
-    onAdd(selected);
-    closePicker();
+    const picked = items.filter((it) => selected.has(it.recipient.key)).map((it) => structuredClone(it.recipient));
+    selected.clear();
+    commit(addRecipients(picked)); // re-renders the list, which calls refreshPicker
   };
 
+  refreshPicker = renderList;
   renderList();
-  $('picker').hidden = false;
-  search.focus();
 }
 
-function closePicker() {
-  $('picker').hidden = true;
-  $('picker-list').replaceChildren();
+/* ---------- Saved lists ---------- */
+
+/** @type {{name: string, savedAt: number, list: Recipient[]}[]} */
+let savedLists = [];
+
+async function loadSavedLists() {
+  savedLists = await getLocal(KEYS.SAVED_LISTS, []);
 }
 
-/**
- * Loads a list from WhatsApp with a busy state on the button.
- * @param {HTMLButtonElement} btn
- * @param {string} type MSG type
- */
-async function fetchList(btn, type) {
-  const label = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Loading…';
-  try {
-    return await sendToWhatsApp(type);
-  } catch (err) {
-    showSummary(err.message, 'err');
-    return null;
-  } finally {
-    btn.disabled = false;
-    btn.textContent = label;
-  }
+function persistSavedLists() {
+  setLocal(KEYS.SAVED_LISTS, savedLists).catch((err) => log('saving lists failed', err));
 }
 
-async function onPickContacts(event) {
-  const contacts = await fetchList(event.currentTarget, MSG.LIST_CONTACTS);
-  if (!contacts) return;
-  const byId = new Map(contacts.map((c) => [c.id, c]));
-  const items = contacts
-    .map((c) => ({ id: c.id, label: c.name || (c.number ? `+${c.number}` : c.id), sub: c.number ? `+${c.number}` : 'Number hidden' }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  openPicker('Pick contacts', items, (ids) => {
-    const picked = [...ids].map((id) => {
-      const c = byId.get(id);
-      return {
-        key: c.number ? `n:${c.number}` : `id:${c.id}`,
-        kind: 'contact',
-        chatId: c.id,
-        number: c.number,
-        name: c.name,
-        vars: { name: c.name },
-      };
-    });
-    commit(addRecipients(picked));
-  });
+function renderSavedLists() {
+  $('lists-box').hidden = savedLists.length === 0;
+  $('lists-empty').hidden = savedLists.length > 0;
+  fillSelect(
+    $('lists-select'),
+    savedLists.map((l, i) => ({ value: String(i), label: `${l.name} (${l.list.length})` })),
+    '0'
+  );
 }
 
-async function onPickGroups(event) {
-  const groups = await fetchList(event.currentTarget, MSG.LIST_GROUPS);
-  if (!groups) return;
-  const byId = new Map(groups.map((g) => [g.id, g]));
-  const items = groups
-    .map((g) => ({
-      id: g.id,
-      label: g.name || 'Unnamed group',
-      sub: g.participantsCount != null ? `${g.participantsCount} members` : 'Group',
-    }))
-    .sort((a, b) => a.label.localeCompare(b.label));
-  openPicker('Pick groups', items, (ids) => {
-    const picked = [...ids].map((id) => {
-      const g = byId.get(id);
-      return { key: `id:${g.id}`, kind: 'group', chatId: g.id, number: null, name: g.name, vars: { name: g.name } };
-    });
-    commit(addRecipients(picked));
-  });
+/** Saves the current recipients under a name; same name (any case) replaces the old list. */
+function onSaveList() {
+  const name = prompt('Name for this list (e.g. Grade 8 all sections):')?.trim();
+  if (!name) return;
+  const existing = savedLists.findIndex((l) => l.name.toLowerCase() === name.toLowerCase());
+  if (existing >= 0 && !confirm(`Replace the saved list "${savedLists[existing].name}"?`)) return;
+  const entry = { name, savedAt: Date.now(), list: structuredClone(state.list) };
+  if (existing >= 0) savedLists[existing] = entry;
+  else savedLists.push(entry);
+  savedLists.sort((a, b) => a.name.localeCompare(b.name));
+  persistSavedLists();
+  renderSavedLists();
+  showSummary(`Saved "${name}" (${entry.list.length} recipients)`);
+}
+
+/** Adds the chosen saved list to the current recipients (duplicates skipped). */
+function onLoadList() {
+  const entry = savedLists[Number($('lists-select').value)];
+  if (!entry) return;
+  commit(addRecipients(structuredClone(entry.list)));
+}
+
+function onDeleteList() {
+  const i = Number($('lists-select').value);
+  const entry = savedLists[i];
+  if (!entry || !confirm(`Delete the saved list "${entry.name}"?`)) return;
+  savedLists.splice(i, 1);
+  persistSavedLists();
+  renderSavedLists();
 }
 
 /* ---------- List rendering ---------- */
@@ -418,30 +475,28 @@ function render() {
     .join(' · ');
   $('rcp-count').textContent = `${list.length} recipient${list.length === 1 ? '' : 's'}${breakdown ? ` (${breakdown})` : ''}`;
   $('rcp-clear').hidden = list.length === 0;
+  $('rcp-save-list').hidden = list.length === 0;
 
-  const body = $('rcp-rows');
-  const frag = document.createDocumentFragment();
-  list.forEach((r) => {
-    const tr = document.createElement('tr');
-    const name = document.createElement('td');
-    name.textContent = r.name || '—';
-    const detail = document.createElement('td');
-    detail.className = 'muted';
-    detail.textContent = r.kind === 'group' ? 'Group' : r.number ? `+${r.number}` : 'Contact';
-    const action = document.createElement('td');
+  const chips = list.map((r) => {
+    const chip = document.createElement('span');
+    chip.className = `rcp-chip rcp-${r.kind}`;
+    const label = r.name || (r.number ? `+${r.number}` : 'Contact');
+    chip.title = r.number ? `+${r.number}` : r.kind === 'group' ? 'WhatsApp group' : 'Contact';
+    const text = document.createElement('span');
+    text.textContent = r.kind === 'group' ? `👥 ${label}` : label;
     const rm = document.createElement('button');
     rm.type = 'button';
-    rm.className = 'icon-btn';
+    rm.className = 'chip-x';
     rm.title = 'Remove';
-    rm.textContent = '✕';
+    rm.textContent = '×';
     rm.addEventListener('click', () => removeRecipient(r.key));
-    action.append(rm);
-    tr.append(name, detail, action);
-    frag.append(tr);
+    chip.append(text, rm);
+    return chip;
   });
-  body.replaceChildren(frag);
-  $('rcp-table').hidden = list.length === 0;
+  $('rcp-chips').replaceChildren(...chips);
+  $('rcp-chips').hidden = list.length === 0;
   $('rcp-empty').hidden = list.length > 0;
+  refreshPicker?.();
 
   $('rcp-invalid').hidden = invalid.length === 0;
   $('rcp-invalid-count').textContent = `${invalid.length} invalid entr${invalid.length === 1 ? 'y' : 'ies'} (not added)`;
@@ -479,7 +534,9 @@ function onClearInvalid() {
 
 /** Wires up the Recipients tab and restores the saved draft. */
 export async function initRecipients() {
-  $('rcp-paste-add').addEventListener('click', onPasteAdd);
+  // Pasted numbers are added immediately; typed ones when the box loses focus.
+  $('rcp-paste').addEventListener('paste', () => setTimeout(addFromPasteBox, 0));
+  $('rcp-paste').addEventListener('blur', addFromPasteBox);
   $('rcp-import').addEventListener('click', () => $('rcp-file').click());
   $('rcp-file').addEventListener('change', onFileChosen);
   $('map-sheet').addEventListener('change', (e) => {
@@ -490,12 +547,17 @@ export async function initRecipients() {
   $('map-name').addEventListener('change', updateVarHint);
   $('map-import').addEventListener('click', onImportConfirm);
   $('map-cancel').addEventListener('click', closeImport);
-  $('rcp-contacts').addEventListener('click', onPickContacts);
-  $('rcp-groups').addEventListener('click', onPickGroups);
-  $('picker-cancel').addEventListener('click', closePicker);
+  document.querySelectorAll('.seg').forEach((b) => b.addEventListener('click', () => setMode(b.dataset.mode)));
+  $('picker-refresh').addEventListener('click', () => {
+    if (mode === 'groups' || mode === 'contacts') showSource(mode, true);
+  });
   $('rcp-clear').addEventListener('click', onClearAll);
   $('rcp-invalid-clear').addEventListener('click', onClearInvalid);
+  $('rcp-save-list').addEventListener('click', onSaveList);
+  $('lists-load').addEventListener('click', onLoadList);
+  $('lists-delete').addEventListener('click', onDeleteList);
 
-  await load();
+  await Promise.all([load(), loadSavedLists()]);
   render();
+  renderSavedLists();
 }

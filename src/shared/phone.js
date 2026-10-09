@@ -81,22 +81,32 @@ export function normalizePhone(raw, countryCode = DEFAULT_COUNTRY_CODE) {
 }
 
 /**
- * Splits one pasted line into name + phone. Accepts "9876543210",
- * "Name, 9876543210", "9876543210, Name" and tab/semicolon separated variants.
- * @param {string} line
- * @returns {{name: string, phone: string}}
+ * Splits pasted text into {name, phone} entries. Numbers can be separated by
+ * commas, semicolons, tabs or new lines: "9876543210, 9123456789".
+ * A part containing letters is a name for the number next to it on the same
+ * line: "Riya, 9876543210" and "9876543210, Riya" both work.
+ * @param {string} text
+ * @returns {{name: string, phone: string}[]}
  */
-export function splitNameAndPhone(line) {
-  const parts = line.split(/[,;\t]/).map((p) => p.trim()).filter(Boolean);
-  if (parts.length <= 1) return { name: '', phone: parts[0] ?? '' };
-  // The phone is the part with the most digits; everything else is the name.
-  const digitCount = (p) => (p.match(/\d/g) || []).length;
-  let phoneIdx = 0;
-  parts.forEach((p, i) => {
-    if (digitCount(p) > digitCount(parts[phoneIdx])) phoneIdx = i;
-  });
-  return {
-    phone: parts[phoneIdx],
-    name: parts.filter((_, i) => i !== phoneIdx).join(' '),
-  };
+export function parseNumberList(text) {
+  const entries = [];
+  for (const line of text.split(/\r?\n/)) {
+    const parts = line.split(/[,;\t]/).map((p) => p.trim()).filter(Boolean);
+    const lineEntries = [];
+    let pendingName = '';
+    for (const part of parts) {
+      if (/\p{L}/u.test(part) && !/^\d[\d.]*e\+?\d+$/i.test(part)) {
+        pendingName = pendingName ? `${pendingName} ${part}` : part;
+      } else {
+        lineEntries.push({ name: pendingName, phone: part });
+        pendingName = '';
+      }
+    }
+    // Trailing name ("9876543210, Riya") belongs to the last number without one.
+    const last = lineEntries[lineEntries.length - 1];
+    if (pendingName && last && !last.name) last.name = pendingName;
+    else if (pendingName && !last) lineEntries.push({ name: '', phone: pendingName }); // shows up as invalid
+    entries.push(...lineEntries);
+  }
+  return entries;
 }

@@ -19,41 +19,64 @@
   </header>
 
   <nav class="tabs" role="tablist">
-    <button class="tab active" role="tab" data-tab="recipients" type="button">Recipients</button>
-    <button class="tab" role="tab" data-tab="message" type="button">Message</button>
-    <button class="tab" role="tab" data-tab="send" type="button">Send</button>
+    <button class="tab active" role="tab" data-tab="send" type="button">Send</button>
     <button class="tab" role="tab" data-tab="reports" type="button">Reports</button>
   </nav>
 
   <main>
-    <section class="panel active" data-panel="recipients" role="tabpanel">
+    <section class="panel active" data-panel="send" role="tabpanel">
+
+      <!-- 1 · Recipients -->
+      <h2 class="step">1 · Recipients</h2>
       <div class="card">
-        <label class="label" for="rcp-paste">Paste numbers</label>
-        <textarea id="rcp-paste" rows="4" placeholder="One per line:&#10;9876543210&#10;Riya Sharma, 9876543210"></textarea>
-        <div class="row">
-          <button id="rcp-paste-add" class="btn btn-small" type="button">Add</button>
+        <div class="segmented" role="tablist">
+          <button class="seg active" type="button" data-mode="numbers">Numbers</button>
+          <button class="seg" type="button" data-mode="groups">Groups</button>
+          <button class="seg" type="button" data-mode="contacts">Contacts</button>
+          <button class="seg" type="button" data-mode="lists">Lists</button>
         </div>
-      </div>
 
-      <div class="button-row">
-        <button id="rcp-import" class="btn btn-secondary" type="button">Import CSV / Excel</button>
-        <button id="rcp-contacts" class="btn btn-secondary" type="button">Pick contacts</button>
-        <button id="rcp-groups" class="btn btn-secondary" type="button">Pick groups</button>
-        <input id="rcp-file" type="file" accept=".csv,.txt,.xlsx,.xls,.ods" hidden>
-      </div>
+        <div class="pane" data-pane="numbers">
+          <textarea id="rcp-paste" rows="3" placeholder="9876543210, 9123456789, 9988776655&#10;or Riya Sharma, 9876543210 (one per line)"></textarea>
+          <div class="row-between">
+            <span class="muted small">Commas or new lines. Pasted numbers are added automatically.</span>
+            <button id="rcp-import" class="btn btn-small btn-secondary" type="button">Import CSV / Excel</button>
+          </div>
+          <input id="rcp-file" type="file" accept=".csv,.txt,.xlsx,.xls,.ods" hidden>
 
-      <div id="import-box" class="card" hidden>
-        <div class="row-between">
-          <strong id="map-file"></strong>
-          <span id="map-rows" class="muted"></span>
+          <div id="import-box" class="subcard" hidden>
+            <div class="row-between">
+              <strong id="map-file"></strong>
+              <span id="map-rows" class="muted"></span>
+            </div>
+            <label id="map-sheet-row" class="field" hidden>Sheet <select id="map-sheet"></select></label>
+            <label class="field">Phone column <select id="map-phone"></select></label>
+            <label class="field">Name column <select id="map-name"></select></label>
+            <p id="map-vars" class="muted small"></p>
+            <div class="row">
+              <button id="map-import" class="btn btn-small" type="button">Import</button>
+              <button id="map-cancel" class="btn btn-small btn-secondary" type="button">Cancel</button>
+            </div>
+          </div>
         </div>
-        <label id="map-sheet-row" class="field" hidden>Sheet <select id="map-sheet"></select></label>
-        <label class="field">Phone column <select id="map-phone"></select></label>
-        <label class="field">Name column <select id="map-name"></select></label>
-        <p id="map-vars" class="muted small"></p>
-        <div class="row">
-          <button id="map-import" class="btn btn-small" type="button">Import</button>
-          <button id="map-cancel" class="btn btn-small btn-secondary" type="button">Cancel</button>
+
+        <div class="pane" data-pane="pick" hidden>
+          <div class="row">
+            <input id="picker-search" type="search" placeholder="Search…">
+            <button id="picker-refresh" class="icon-btn" type="button" title="Reload from WhatsApp">↻</button>
+          </div>
+          <label class="picker-row picker-all"><input id="picker-all" type="checkbox"> Select all shown</label>
+          <div id="picker-list" class="picker-list"></div>
+          <button id="picker-add" class="btn btn-small" type="button" disabled>Add 0 selected</button>
+        </div>
+
+        <div class="pane" data-pane="lists" hidden>
+          <p id="lists-empty" class="muted small">No saved lists yet. Select recipients, then click 💾 Save list.</p>
+          <div id="lists-box" class="row" hidden>
+            <select id="lists-select"></select>
+            <button id="lists-load" class="btn btn-small" type="button">Add</button>
+            <button id="lists-delete" class="icon-btn" type="button" title="Delete saved list">🗑</button>
+          </div>
         </div>
       </div>
 
@@ -61,42 +84,107 @@
 
       <div class="row-between list-head">
         <strong id="rcp-count">0 recipients</strong>
-        <button id="rcp-clear" class="link-btn" type="button" hidden>Clear all</button>
+        <span class="row">
+          <button id="rcp-save-list" class="link-btn" type="button" hidden>💾 Save list</button>
+          <button id="rcp-clear" class="link-btn" type="button" hidden>🗑 Clear</button>
+        </span>
       </div>
-      <p id="rcp-empty" class="muted">No recipients yet.</p>
-      <table id="rcp-table" class="table" hidden>
-        <tbody id="rcp-rows"></tbody>
-      </table>
+      <p id="rcp-empty" class="muted small">No recipients yet — add numbers, groups or contacts above.</p>
+      <div id="rcp-chips" class="chip-box" hidden></div>
 
       <details id="rcp-invalid" class="invalid" hidden>
         <summary id="rcp-invalid-count"></summary>
         <ul id="rcp-invalid-list"></ul>
         <button id="rcp-invalid-clear" class="link-btn" type="button">Clear invalid list</button>
       </details>
+
+      <!-- 2 · Message -->
+      <h2 class="step">2 · Message</h2>
+      <div class="card">
+        <div class="row-between">
+          <span class="fmt-bar" id="msg-fmt">
+            <button class="fmt-btn" type="button" data-marker="*" title="Bold"><b>B</b></button>
+            <button class="fmt-btn" type="button" data-marker="_" title="Italic"><i>I</i></button>
+            <button class="fmt-btn" type="button" data-marker="~" title="Strikethrough"><s>S</s></button>
+            <button class="fmt-btn" type="button" data-marker="```" title="Monospace"><code>{}</code></button>
+          </span>
+          <span class="row">
+            <button id="att-add" class="icon-btn icon-lg" type="button" title="Attach photos, videos or files">📎</button>
+            <input id="att-file" type="file" multiple hidden>
+          </span>
+        </div>
+        <textarea id="msg-text" rows="6" placeholder="Type your message here… e.g. Dear {name},"></textarea>
+        <div id="msg-vars" class="chips"></div>
+        <div class="row">
+          <select id="tpl-select"></select>
+          <button id="tpl-save" class="btn btn-small btn-secondary" type="button">Save</button>
+          <button id="tpl-delete" class="icon-btn" type="button" title="Delete template">🗑</button>
+        </div>
+
+        <p id="att-error" class="summary summary-err" hidden></p>
+        <div id="att-list" class="att-list"></div>
+        <label id="att-caption-opt" class="check"><input id="msg-as-caption" type="checkbox"> Put the text as caption of the first attachment</label>
+        <p class="muted small">📎 Photos (JPG, PNG, WebP) up to 5 MB, MP4 videos up to 16 MB, other files as documents up to 40 MB.</p>
+
+        <details class="preview">
+          <summary>Preview <span id="pv-who" class="muted small"></span></summary>
+          <div class="row-between">
+            <button id="pv-prev" class="icon-btn" type="button" title="Previous recipient">‹ Prev</button>
+            <button id="pv-next" class="icon-btn" type="button" title="Next recipient">Next ›</button>
+          </div>
+          <div id="pv-chat" class="chat"></div>
+        </details>
+        <div id="pv-warn" class="summary summary-warn" hidden></div>
+        <div class="row">
+          <button id="msg-test" class="btn btn-small btn-secondary" type="button">Send test to myself</button>
+          <span id="msg-test-status" class="muted small"></span>
+        </div>
+      </div>
+
+      <!-- 3 · Options -->
+      <details class="card options">
+        <summary><span class="label">More options</span> <span id="set-summary" class="muted small"></span></summary>
+        <label class="field">Time gap (sec) <span class="range"><input id="set-delay-min" type="number" min="1"> to <input id="set-delay-max" type="number" min="1"></span></label>
+        <label class="field">Batch size <input id="set-batch" type="number" min="1"></label>
+        <label class="field">Batch pause (min) <span class="range"><input id="set-pause-min" type="number" min="0" step="0.5"> to <input id="set-pause-max" type="number" min="0" step="0.5"></span></label>
+        <label class="field">Daily limit <input id="set-cap" type="number" min="1"></label>
+        <label class="check"><input id="set-check" type="checkbox"> Check numbers are on WhatsApp before sending</label>
+        <button id="set-reset" class="link-btn small" type="button">Reset to safe defaults</button>
+      </details>
+      <p id="set-warn" class="summary summary-warn" hidden></p>
+
+      <!-- Send / progress -->
+      <div id="send-box" class="card">
+        <label class="field">Campaign name <input id="cp-new-name" type="text" placeholder="optional, e.g. PTM reminder"></label>
+        <div id="cp-summary" class="small"></div>
+        <button id="cp-start" class="btn btn-send" type="button">Send</button>
+        <p id="cp-error" class="summary summary-err" hidden></p>
+      </div>
+
+      <div id="cp-box" class="card" hidden>
+        <div class="row-between">
+          <strong id="cp-name"></strong>
+          <span id="cp-state" class="pill pill-muted"></span>
+        </div>
+        <div class="progress"><div id="cp-bar" class="progress-bar"></div></div>
+        <div id="cp-counts" class="small"></div>
+        <div id="cp-status" class="muted small"></div>
+        <div class="row">
+          <button id="cp-pause" class="btn btn-small btn-secondary" type="button">Pause</button>
+          <button id="cp-resume" class="btn btn-small" type="button">Resume</button>
+          <button id="cp-stop" class="btn btn-small btn-danger" type="button">Stop</button>        </div>
+        <details>
+          <summary class="small">Live log</summary>
+          <ul id="cp-log" class="log"></ul>
+        </details>
+      </div>
     </section>
-    <section class="panel" data-panel="message" role="tabpanel">
-      <p class="placeholder">Message: text, variables, attachments, preview. <em>Coming in Phase 3.</em></p>
-    </section>
-    <section class="panel" data-panel="send" role="tabpanel">
-      <p class="placeholder">Send: settings, start / pause / stop, progress. <em>Coming in Phase 4.</em></p>
-    </section>
+
     <section class="panel" data-panel="reports" role="tabpanel">
-      <p class="placeholder">Reports: history, CSV export, retry failed. <em>Coming in Phase 5.</em></p>
+      <p id="rp-empty" class="muted">No campaigns yet.</p>
+      <div id="rp-list"></div>
     </section>
   </main>
-
-  <div id="picker" class="overlay" hidden>
-    <div class="sheet">
-      <div class="row-between">
-        <strong id="picker-title"></strong>
-        <button id="picker-cancel" class="icon-btn" type="button" title="Close">✕</button>
-      </div>
-      <input id="picker-search" type="search" placeholder="Search…">
-      <label class="picker-row picker-all"><input id="picker-all" type="checkbox"> Select all shown</label>
-      <div id="picker-list" class="picker-list"></div>
-      <button id="picker-add" class="btn" type="button" disabled>Add 0 selected</button>
-    </div>
-  </div>
 
   <script src="../../vendor/xlsx.full.min.js"></script>
   <script type="module" src="sidepanel.js"></script>

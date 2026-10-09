@@ -9,7 +9,16 @@
 (() => {
   const SOURCE_EXT = 'WBS_EXT';
   const SOURCE_BRIDGE = 'WBS_BRIDGE';
-  const CMD = { STATUS: 'status', LIST_CONTACTS: 'listContacts', LIST_GROUPS: 'listGroups' };
+  const CMD = {
+    STATUS: 'status',
+    LIST_CONTACTS: 'listContacts',
+    LIST_GROUPS: 'listGroups',
+    CHECK_NUMBER: 'checkNumber',
+    SEND_TEXT: 'sendText',
+    SEND_FILE: 'sendFile',
+  };
+  // markIsRead off: sending shouldn't silently mark a busy class group as read.
+  const SEND_OPTIONS = { createChat: true, markIsRead: false };
   const ENGINE_READY_TIMEOUT_MS = 60_000;
 
   const loadedAt = Date.now();
@@ -39,6 +48,17 @@
         }
       }, 500);
     });
+  }
+
+  /**
+   * Turns a WA-JS send result into {id}, throwing if WhatsApp reported a failure.
+   * @returns {{id: string|null}}
+   */
+  function sendOutcome(res) {
+    const result = res?.sendMsgResult?.messageSendResult;
+    if (result && result !== 'OK') throw new Error(`WhatsApp refused the message (${result}).`);
+    if (typeof res?.ack === 'number' && res.ack < 0) throw new Error('WhatsApp could not send the message.');
+    return { id: res?.id ? String(res.id) : null };
   }
 
   /** Command handlers. Each returns plain serialisable data only. */
@@ -96,6 +116,25 @@
           participantsCount,
         };
       });
+    },
+
+    /** Is this number on WhatsApp? → its chat id ("…@c.us") or null. */
+    async [CMD.CHECK_NUMBER](number) {
+      const res = await getWPP().contact.queryExists(`${number}@c.us`);
+      return res?.wid ? res.wid._serialized ?? String(res.wid) : null;
+    },
+
+    async [CMD.SEND_TEXT](chatId, text) {
+      return sendOutcome(await getWPP().chat.sendTextMessage(chatId, text, SEND_OPTIONS));
+    },
+
+    /**
+     * @param {string} chatId
+     * @param {string} dataUrl
+     * @param {{type: 'image'|'video'|'document', caption?: string, filename: string, mimetype: string}} opts
+     */
+    async [CMD.SEND_FILE](chatId, dataUrl, opts) {
+      return sendOutcome(await getWPP().chat.sendFileMessage(chatId, dataUrl, { ...opts, ...SEND_OPTIONS }));
     },
   };
 

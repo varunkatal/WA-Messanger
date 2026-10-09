@@ -34,18 +34,37 @@ export const CAMPAIGN_DEFAULTS = {
   textAsCaption: true,
 };
 
+/** Lines kept in a campaign's live log. */
+export const CAMPAIGN_LOG_MAX = 200;
+
 /** Warn in the UI when the user goes past these (Phase 6). */
 export const SAFETY_WARN = {
   minDelaySec: 5,
   maxDailyCap: 300,
 };
 
-/** Attachment size limits in bytes (Phase 3). */
+/**
+ * Attachment size limits in bytes. Documents are capped at 40 MB even though
+ * WhatsApp allows more: files travel to the WhatsApp tab as data URLs (~33%
+ * bigger than the file) through Chrome messaging, which tops out near 64 MB.
+ */
 export const MEDIA_LIMITS = {
   image: 5 * 1024 * 1024,
   video: 16 * 1024 * 1024,
-  document: 100 * 1024 * 1024,
+  document: 40 * 1024 * 1024,
 };
+
+/**
+ * File types WhatsApp shows inline as photo / video. Anything else (PDF, Word,
+ * GIF, MOV…) is sent as a document, which always works.
+ */
+export const MEDIA_MIME = {
+  image: ['image/jpeg', 'image/png', 'image/webp'],
+  video: ['video/mp4', 'video/3gpp'],
+};
+
+/** Longer text than this is sent as its own message instead of as a caption. */
+export const CAPTION_MAX_CHARS = 1024;
 
 /**
  * Logs with the [WBS] prefix when DEBUG is on.

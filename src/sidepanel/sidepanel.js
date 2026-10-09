@@ -5,6 +5,9 @@ import { MSG, CONN } from '../shared/messages.js';
 import { STATUS_POLL_MS, log } from '../shared/config.js';
 import { findWhatsAppTab } from './whatsapp.js';
 import { initRecipients } from './recipients.js';
+import { initComposer } from './composer.js';
+import { initCampaign } from './campaign.js';
+import { initReports } from './reports.js';
 
 /* ---------- Tabs ---------- */
 
@@ -96,7 +99,10 @@ async function onWhatsAppButton() {
 /* ---------- Init ---------- */
 
 initTabs();
-initRecipients();
+// Recipients first: the other tabs read the recipient list.
+initRecipients()
+  .then(() => Promise.all([initComposer(), initCampaign(), initReports()]))
+  .catch((err) => log('init failed', err));
 document.getElementById('wa-button').addEventListener('click', onWhatsAppButton);
 refreshStatus();
 setInterval(refreshStatus, STATUS_POLL_MS);

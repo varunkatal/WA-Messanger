@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-This file is the design spec; the phase plan is in `ROADMAP.md`. Phases 1–2 (connection, recipients) are built. Vendored: WA-JS 4.6.1, SheetJS 0.20.3.
+This file is the design spec; the phase plan is in `ROADMAP.md`. Phases 1–5 (connection, recipients, composer, campaign engine, reports) are built; Phase 6 (polish) is next. Vendored: WA-JS 4.6.1, SheetJS 0.20.3.
 
 Implementation notes not obvious from the spec:
 - `content.js` loads `src/shared/*.js` via dynamic `import(chrome.runtime.getURL(...))`, which is why those files are in `web_accessible_resources`. Its `onMessage` listener is registered synchronously and awaits the modules inside.
 - Bridge readiness has two levels: `WPP.isReady` (modules hooked, also true on the QR login screen) and `WPP.isFullReady` (logged in, safe to send). Status uses the first to tell "not logged in" apart from "engine broken"; send commands wait for the second.
 - Recipient draft is a list of `{key, kind, chatId, number, name, vars}` in `chrome.storage.local` (`KEYS.RECIPIENTS_DRAFT`). Dedupe key is `n:<number>` when a number is known, else `id:<chatId>`, so a picked contact and the same typed number collapse.
+- Attachments: Blobs live in the side panel's IndexedDB (`wbs` / `media`). The content script can't read that origin, so on campaign start each file is copied once to `chrome.storage.local` as a data URL under `media:<id>`; Reports → Delete removes those no other campaign uses.
+- Campaigns: each stored at `campaign:<id>`, ids listed in `KEYS.CAMPAIGN_INDEX`, the Send tab shows `KEYS.ACTIVE_CAMPAIGN`. The side panel only creates a campaign; after `CAMPAIGN_START` the content script owns it and writes it after every recipient. The panel re-renders from `storage.onChanged`.
+- Bridge sends use `markIsRead: false` so sending to a class group doesn't mark it read. WA-JS waits for the server ack by default.
+- The runner can be exercised in Node with a fake `window`/`chrome` (load `content.js` via `new Function`), since its shared modules are plain ESM.
 - Phone rules are covered by quick Node checks: `src/shared/phone.js` has no chrome APIs, so `node -e "import('./src/shared/phone.js').then(m => console.log(m.normalizePhone('09876543210')))"` works.
 
 ## Commands
@@ -110,7 +114,7 @@ Chat IDs: individual = `<countrycode+number>@c.us`, group = `...@g.us`. **Do not
 ### Media handling
 - User picks files in side panel → store `Blob` in IndexedDB with `{id, name, mime, size, caption}`.
 - When sending, the side panel (or content script on request) converts to a data URL and passes it through messaging. Cache the data URL per campaign so each file is converted once.
-- Limits in `config.js`: image 5 MB, video 16 MB, document 100 MB. Reject larger files with a clear message.
+- Limits in `config.js`: image 5 MB, video 16 MB, document 40 MB (not 100: data URLs are ~33% bigger and Chrome messaging tops out near 64 MB). Reject larger files with a clear message.
 - Order per recipient: text message first (if any, and if no attachments carry the text), then each attachment with its caption. Option: "put text as caption of first attachment" (default ON — fewer messages).
 
 ### Phone normalisation (`phone.js`)
@@ -125,10 +129,10 @@ Strip spaces, dashes, brackets, `+`. Handle Excel numbers (`9.87654321E9`, `9876
 - Pause/Stop take effect between messages, and also cancel the current delay timer.
 
 ### UI (side panel)
-Tabs: **Recipients · Message · Send · Reports**. Clean, compact, works at ~360 px width.
+Tabs: **Send · Reports**. The Send tab is one screen in Premium Sender Pro's order: 1 · Recipients (Numbers / Groups / Contacts / Lists switch, selected recipients as chips) → 2 · Message (captions are multi-line with their own format bar) → More options (settings, collapsed) → Send button, replaced by the progress card while a campaign runs. Clean, compact, works at ~360 px width.
 - Header: connection status pill (Connected / Open WhatsApp Web / Not logged in) + button to open/focus WhatsApp tab.
-- Recipients: textarea for paste, file import with column mapping dropdowns, "Pick contacts", "Pick groups" (searchable checkbox lists with select-all), final table with counts (valid / invalid / duplicates removed) and remove buttons.
-- Message: textarea, clickable variable chips, attachment list with caption fields and thumbnails, preview card styled like a WhatsApp bubble, "Send test to myself".
+- Recipients: textarea for paste, file import with column mapping dropdowns, "Pick contacts", "Pick groups" (searchable checkbox lists with select-all), final table with counts (valid / invalid / duplicates removed) and remove buttons. Saved lists: save the current recipients under a name, load (merge + dedupe) or delete later (`KEYS.SAVED_LISTS`).
+- Message: textarea, formatting buttons (bold / italic / strike / mono — wrap the selection in WhatsApp markers), saved templates dropdown (`KEYS.TEMPLATES`), clickable variable chips, attachment list with caption fields and thumbnails, preview card styled like a WhatsApp bubble, "Send test to myself".
 - Send: settings fields, estimated time, Start / Pause / Resume / Stop, progress bar, live log.
 - Reports: campaign history, export CSV, retry failed.
 - Before starting any campaign: confirmation dialog showing recipient count and estimated duration.

@@ -17,11 +17,14 @@ Build one phase at a time. Each phase ends with a working, testable extension.
 - Paste/typed numbers, CSV/XLSX import with column mapping (name, number, extra vars).
 - Bridge `listContacts`, `listGroups`; searchable pickers with select-all.
 - Final recipients table: valid / invalid / duplicates counts, remove buttons. Persist draft list.
+- Saved lists: save the current recipients under a name (e.g. "Grade 8 all sections"), load one back (merged, deduped), delete.
 
 ## Phase 3 — Message composer
 - Text area, variable chips (`{name}` + imported columns), `template.js` rendering.
 - Attachments (image/video/document) stored in IndexedDB, size limits, captions, thumbnails.
 - "Text as caption of first attachment" option.
+- Formatting buttons: wrap selected text in `*bold*`, `_italic_`, `~strike~`, `` `mono` ``.
+- Saved message templates: save current text under a name, pick from a dropdown, delete.
 - WhatsApp-style preview; bridge `sendText`, `sendFile`; "Send test to myself".
 
 ## Phase 4 — Campaign engine
