@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "WhatsApp Bulk Sender",
+  "version": "0.1.0",
+  "description": "Send bulk WhatsApp messages through your own WhatsApp Web tab.",
+  "minimum_chrome_version": "114",
+  "icons": {
+    "16": "icons/16.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "action": {
+    "default_title": "WhatsApp Bulk Sender"
+  },
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+  "permissions": ["storage", "sidePanel", "tabs", "scripting", "unlimitedStorage"],
+  "host_permissions": ["https://web.whatsapp.com/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["vendor/wppconnect-wa.js", "src/content/bridge-main.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://web.whatsapp.com/*"],
+      "js": ["src/content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/shared/*.js"],
+      "matches": ["https://web.whatsapp.com/*"]
+    }
+  ]
+}

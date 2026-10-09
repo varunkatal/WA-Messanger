@@ -1,0 +1,141 @@
+# CLAUDE.md — WhatsApp Bulk Sender (Chrome Extension)
+
+This file guides Claude Code while building this project. Read it fully before writing code. The full plan is in `ROADMAP.md`.
+
+## Project summary
+
+A Manifest V3 Chrome extension that sends bulk WhatsApp messages through the user's own logged-in **WhatsApp Web** tab. Recipients can be phone numbers (typed, pasted, CSV/Excel), WhatsApp contacts, and WhatsApp groups. Messages can be text and/or images, videos and documents, each with an optional caption. Text supports personalisation variables like `{name}`.
+
+Owner: Varun (teacher, India). Main use: messaging students/parents and class groups. Default country code: **91**.
+
+## How to work with me (important)
+
+1. **Build phase by phase** following `ROADMAP.md`. Do not jump ahead. Finish a phase, then stop.
+2. At the end of each phase, tell me: what was built, which files changed, and **exact steps to test it in Chrome** (`chrome://extensions` → Developer mode → Load unpacked / Reload).
+3. **Explain briefly why** for any important decision — I want to understand the code, not just receive it.
+4. Prefer **simple and working** over feature-rich and complex. If a feature adds a lot of complexity, ask first.
+5. Keep configuration separate from logic (`src/shared/config.js`).
+6. I test with real data early — make import tolerant of messy Excel files (extra spaces, `+91`, `0` prefix, empty rows, numbers stored as numbers/scientific notation).
+7. I'm on a Mac with Chrome.
+
+## Tech stack & constraints
+
+- Manifest V3, plain JavaScript ES modules, HTML, CSS. **No build step, no frameworks, no npm runtime dependencies.**
+- Vendor files (downloaded once, committed in `/vendor`):
+  - `wppconnect-wa.js` — from `@wppconnect/wa-js` (`dist/wppconnect-wa.js`). Exposes global `WPP`.
+  - `xlsx.full.min.js` — SheetJS, for CSV/XLSX import and CSV export.
+- MV3 forbids remotely hosted code: **never load scripts from a CDN at runtime.**
+- Chrome ≥ 114 (side panel API, `world: "MAIN"` content scripts).
+
+## Folder structure
+
+```
+/manifest.json
+/vendor/wppconnect-wa.js
+/vendor/xlsx.full.min.js
+/icons/16.png 48.png 128.png
+/src/background/service-worker.js     # opens side panel, finds/opens WhatsApp tab, relays messages
+/src/content/bridge-main.js           # MAIN world: waits for WPP, executes WPP calls, replies via postMessage
+/src/content/content.js               # ISOLATED world: queue runner, talks to side panel + bridge
+/src/sidepanel/sidepanel.html
+/src/sidepanel/sidepanel.css
+/src/sidepanel/sidepanel.js           # tab switching, state
+/src/sidepanel/recipients.js          # manual entry, import, contacts/groups pickers
+/src/sidepanel/composer.js            # text, variables, attachments, preview
+/src/sidepanel/campaign.js            # settings, start/pause/resume/stop, progress
+/src/sidepanel/reports.js             # history, export CSV, retry failed
+/src/shared/config.js                 # defaults: country code, delays, limits, file sizes
+/src/shared/phone.js                  # normalisation + validation
+/src/shared/storage.js                # chrome.storage + IndexedDB helpers
+/src/shared/messages.js               # message type constants for all messaging
+/src/shared/template.js               # {variable} rendering, spintax (later)
+```
+
+## Architecture
+
+### Three execution contexts
+1. **Side panel** (extension page) — all UI. Holds media in IndexedDB (extension origin).
+2. **Content script, ISOLATED world** (`content.js`, on `https://web.whatsapp.com/*`) — runs the campaign queue (so it keeps running even if the side panel is closed), persists progress, relays commands to the bridge.
+3. **Content script, MAIN world** (`bridge-main.js` + `vendor/wppconnect-wa.js`) — only place that can access `WPP`. Pure executor: receives a command, calls WPP, returns result.
+
+The service worker is thin: MV3 service workers get killed when idle, so **never keep campaign state only in the service worker.**
+
+### manifest.json essentials
+- `permissions`: `storage`, `sidePanel`, `tabs`, `scripting`, `unlimitedStorage`
+- `host_permissions`: `https://web.whatsapp.com/*`
+- `side_panel.default_path`: `src/sidepanel/sidepanel.html`
+- `content_scripts`:
+  - `{ matches: [web.whatsapp.com], js: [vendor/wppconnect-wa.js, src/content/bridge-main.js], world: "MAIN", run_at: "document_start" }`
+  - `{ matches: [web.whatsapp.com], js: [src/content/content.js], run_at: "document_idle" }` (content scripts can't be ES modules; keep content.js self-contained or load shared helpers as plain scripts listed before it)
+- Action click → open side panel (`chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true })`).
+
+### Messaging protocol
+- Side panel ⇄ content script: `chrome.tabs.sendMessage(whatsAppTabId, {type, payload})` and `chrome.runtime.sendMessage` back. Progress also written to `chrome.storage.local` so the panel can rebuild state via `storage.onChanged` after being reopened.
+- Content script ⇄ bridge: `window.postMessage({source: "WBS_EXT", id, cmd, args}, "*")` → bridge replies `{source: "WBS_BRIDGE", id, ok, result | error}`. Use a request `id` and a promise map with a timeout (default 60 s for media). **Always check `event.source === window` and the `source` tag**; ignore everything else (WhatsApp posts its own messages).
+- Define all `type`/`cmd` strings in `src/shared/messages.js` (and mirror them in the bridge, which can't import modules).
+
+### Bridge commands (WA-JS)
+Wait for readiness with `WPP.webpack.onReady(...)` / `WPP.isReady`, and check login with `WPP.conn.isAuthenticated()`. Commands:
+
+| cmd | WA-JS call (verify signatures against the WA-JS docs for the vendored version) |
+|---|---|
+| `status` | `WPP.isReady`, `WPP.conn.isAuthenticated()`, `WPP.conn.getMyUserId()` |
+| `listGroups` | `WPP.chat.list({ onlyGroups: true })` → `[{id, name, participantsCount}]` |
+| `listContacts` | `WPP.contact.list({ onlyMyContacts: true })` → `[{id, name, number}]` |
+| `checkNumber` | `WPP.contact.queryExists(number + "@c.us")` → wid or null |
+| `sendText` | `WPP.chat.sendTextMessage(chatId, text, { createChat: true })` |
+| `sendFile` | `WPP.chat.sendFileMessage(chatId, dataUrl, { type, caption, filename, mimetype, createChat: true })` with `type` = `image` / `video` / `document` |
+
+Return only plain serialisable data (ids as strings, `_serialized`), never WA model objects.
+
+Chat IDs: individual = `<countrycode+number>@c.us`, group = `...@g.us`. **Do not hard-code the `@lid` / newer id formats** — always use the id returned by WPP for contacts/groups.
+
+### Media handling
+- User picks files in side panel → store `Blob` in IndexedDB with `{id, name, mime, size, caption}`.
+- When sending, the side panel (or content script on request) converts to a data URL and passes it through messaging. Cache the data URL per campaign so each file is converted once.
+- Limits in `config.js`: image 5 MB, video 16 MB, document 100 MB. Reject larger files with a clear message.
+- Order per recipient: text message first (if any, and if no attachments carry the text), then each attachment with its caption. Option: "put text as caption of first attachment" (default ON — fewer messages).
+
+### Phone normalisation (`phone.js`)
+Strip spaces, dashes, brackets, `+`. Handle Excel numbers (`9.87654321E9`, `9876543210.0`). Leading `0` → drop. 10 digits → prefix `91`. `91` + 10 digits → keep. Otherwise mark invalid with a reason. Dedupe by final number (and groups by id).
+
+### Campaign engine (`content.js`)
+- Campaign object: `{id, name, createdAt, recipients:[{chatId, name, vars, kind:'number'|'contact'|'group', status:'pending'|'sent'|'failed'|'skipped', error, sentAt}], message:{text, attachments:[mediaId...], textAsCaption}, settings, cursor, state:'running'|'paused'|'stopped'|'done'}`.
+- Loop: take next pending → (if number and `checkBeforeSend`) `checkNumber` → skip if not on WhatsApp → render template → send → update status → **persist to `chrome.storage.local` after every recipient** → wait random delay → batch pause every N.
+- Defaults (`config.js`): delay 8–20 s random, batch 25 then pause 3–6 min, daily cap 200, stop after 5 consecutive failures.
+- Daily count stored with date key (IST date) to enforce cap across campaigns.
+- On page load, if a campaign is `running`, show it as **paused** and let the user resume (do not auto-resume silently).
+- Pause/Stop take effect between messages, and also cancel the current delay timer.
+
+### UI (side panel)
+Tabs: **Recipients · Message · Send · Reports**. Clean, compact, works at ~360 px width.
+- Header: connection status pill (Connected / Open WhatsApp Web / Not logged in) + button to open/focus WhatsApp tab.
+- Recipients: textarea for paste, file import with column mapping dropdowns, "Pick contacts", "Pick groups" (searchable checkbox lists with select-all), final table with counts (valid / invalid / duplicates removed) and remove buttons.
+- Message: textarea, clickable variable chips, attachment list with caption fields and thumbnails, preview card styled like a WhatsApp bubble, "Send test to myself".
+- Send: settings fields, estimated time, Start / Pause / Resume / Stop, progress bar, live log.
+- Reports: campaign history, export CSV, retry failed.
+- Before starting any campaign: confirmation dialog showing recipient count and estimated duration.
+
+## Coding conventions
+- Small, readable functions; JSDoc comments on public functions.
+- `async/await` everywhere; every bridge call wrapped in try/catch with a human-readable error.
+- No `innerHTML` with user/imported data — use `textContent` (names come from Excel/WhatsApp).
+- Logs prefixed `[WBS]`; a `DEBUG` flag in `config.js`.
+- No analytics, no external network calls. All data stays local.
+
+## Testing checklist (per phase)
+- Reload extension at `chrome://extensions`, then **reload the WhatsApp Web tab** (content scripts only attach on page load).
+- Test on own numbers and a private test group before any real list.
+- Check the service worker console and the WhatsApp tab console (`[WBS]` logs).
+
+## Known pitfalls
+- WhatsApp Web updates can break WA-JS → keep it a single replaceable vendor file and show a clear "WhatsApp engine not ready — update WA-JS" error if `WPP` never becomes ready (timeout 60 s).
+- Content scripts don't attach to an already-open tab after install — prompt user to reload WhatsApp Web.
+- Side panel closing must not stop the campaign (runner lives in content script).
+- Chrome messaging has a size limit (~64 MB); data URLs are ~33% bigger than the file — respect the media limits.
+- Ban risk: never remove delays/limits for "speed". Warn in UI when the user sets delay < 5 s or daily cap > 300.
+
+## Out of scope
+- WhatsApp Business API / paid gateways
+- Chrome Web Store publishing (install as unpacked / zip)
+- Scraping numbers from groups for messaging strangers

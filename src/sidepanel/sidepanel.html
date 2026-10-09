@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WhatsApp Bulk Sender</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="header">
+    <div class="header-row">
+      <h1 class="title">Bulk Sender</h1>
+      <span id="status-pill" class="pill pill-muted">Checking…</span>
+    </div>
+    <div class="header-row">
+      <span id="status-detail" class="detail"></span>
+      <button id="wa-button" class="btn btn-small" type="button">Open WhatsApp</button>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" role="tab" data-tab="recipients" type="button">Recipients</button>
+    <button class="tab" role="tab" data-tab="message" type="button">Message</button>
+    <button class="tab" role="tab" data-tab="send" type="button">Send</button>
+    <button class="tab" role="tab" data-tab="reports" type="button">Reports</button>
+  </nav>
+
+  <main>
+    <section class="panel active" data-panel="recipients" role="tabpanel">
+      <p class="placeholder">Recipients: paste numbers, import CSV/Excel, pick contacts and groups. <em>Coming in Phase 2.</em></p>
+    </section>
+    <section class="panel" data-panel="message" role="tabpanel">
+      <p class="placeholder">Message: text, variables, attachments, preview. <em>Coming in Phase 3.</em></p>
+    </section>
+    <section class="panel" data-panel="send" role="tabpanel">
+      <p class="placeholder">Send: settings, start / pause / stop, progress. <em>Coming in Phase 4.</em></p>
+    </section>
+    <section class="panel" data-panel="reports" role="tabpanel">
+      <p class="placeholder">Reports: history, CSV export, retry failed. <em>Coming in Phase 5.</em></p>
+    </section>
+  </main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>
