@@ -72,12 +72,31 @@
     }
   }
 
+  /**
+   * Runs a bridge command and wraps the outcome as {ok, result | error}.
+   * @param {string} cmd
+   * @param {any[]} [args]
+   */
+  async function relay(cmd, args) {
+    try {
+      return { ok: true, result: await callBridge(cmd, args) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  }
+
   // Registered synchronously so early messages from the side panel aren't lost.
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    modulesReady.then(({ MSG }) => {
+    modulesReady.then(({ MSG, BRIDGE_CMD }) => {
       switch (msg?.type) {
         case MSG.GET_STATUS:
           getStatus().then(sendResponse);
+          break;
+        case MSG.LIST_CONTACTS:
+          relay(BRIDGE_CMD.LIST_CONTACTS).then(sendResponse);
+          break;
+        case MSG.LIST_GROUPS:
+          relay(BRIDGE_CMD.LIST_GROUPS).then(sendResponse);
           break;
         default:
           sendResponse({ ok: false, error: `Unknown message type: ${msg?.type}` });

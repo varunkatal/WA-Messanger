@@ -2,7 +2,9 @@
  * Side panel entry: tab switching and the connection status header.
  */
 import { MSG, CONN } from '../shared/messages.js';
-import { STATUS_POLL_MS, WHATSAPP_URL_PATTERN, log } from '../shared/config.js';
+import { STATUS_POLL_MS, log } from '../shared/config.js';
+import { findWhatsAppTab } from './whatsapp.js';
+import { initRecipients } from './recipients.js';
 
 /* ---------- Tabs ---------- */
 
@@ -44,7 +46,7 @@ let current = { state: null, tabId: null };
  * @returns {Promise<{state: string, tabId: number|null, me?: string, error?: string}>}
  */
 async function fetchStatus() {
-  const [tab] = await chrome.tabs.query({ url: WHATSAPP_URL_PATTERN });
+  const tab = await findWhatsAppTab();
   if (!tab) return { state: CONN.NO_TAB, tabId: null };
   try {
     const res = await chrome.tabs.sendMessage(tab.id, { type: MSG.GET_STATUS });
@@ -94,6 +96,7 @@ async function onWhatsAppButton() {
 /* ---------- Init ---------- */
 
 initTabs();
+initRecipients();
 document.getElementById('wa-button').addEventListener('click', onWhatsAppButton);
 refreshStatus();
 setInterval(refreshStatus, STATUS_POLL_MS);

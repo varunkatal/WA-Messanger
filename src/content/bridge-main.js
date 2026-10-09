@@ -9,7 +9,7 @@
 (() => {
   const SOURCE_EXT = 'WBS_EXT';
   const SOURCE_BRIDGE = 'WBS_BRIDGE';
-  const CMD = { STATUS: 'status' };
+  const CMD = { STATUS: 'status', LIST_CONTACTS: 'listContacts', LIST_GROUPS: 'listGroups' };
   const ENGINE_READY_TIMEOUT_MS = 60_000;
 
   const loadedAt = Date.now();
@@ -64,6 +64,38 @@
         me,
         engineTimedOut: !loaded && Date.now() - loadedAt > ENGINE_READY_TIMEOUT_MS,
       };
+    },
+
+    /** Saved contacts → [{id, name, number}]. `number` is null when WhatsApp hides it (@lid ids). */
+    async [CMD.LIST_CONTACTS]() {
+      const contacts = await getWPP().contact.list({ onlyMyContacts: true });
+      return contacts
+        .filter((c) => c.id && !c.id.isGroup?.() && c.id.server !== 'broadcast')
+        .map((c) => {
+          const number =
+            c.id.server === 'c.us' ? c.id.user : c.phoneNumber?.user ?? null;
+          return {
+            id: c.id._serialized,
+            name: c.name || c.pushname || c.formattedName || '',
+            number,
+          };
+        });
+    },
+
+    /** Groups the user is in → [{id, name, participantsCount}]. */
+    async [CMD.LIST_GROUPS]() {
+      const chats = await getWPP().chat.list({ onlyGroups: true });
+      return chats.map((c) => {
+        let participantsCount = null;
+        try {
+          participantsCount = c.groupMetadata?.participants?.length ?? null;
+        } catch { /* metadata not loaded yet */ }
+        return {
+          id: c.id._serialized,
+          name: c.name || c.formattedTitle || c.groupMetadata?.subject || '',
+          participantsCount,
+        };
+      });
     },
   };
 

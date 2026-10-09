@@ -4,11 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-This file is the design spec; the phase plan is in `ROADMAP.md`. Phase 1 (skeleton & connection) is built. Vendored: WA-JS 4.6.1, SheetJS 0.20.3.
+This file is the design spec; the phase plan is in `ROADMAP.md`. Phases 1–2 (connection, recipients) are built. Vendored: WA-JS 4.6.1, SheetJS 0.20.3.
 
 Implementation notes not obvious from the spec:
 - `content.js` loads `src/shared/*.js` via dynamic `import(chrome.runtime.getURL(...))`, which is why those files are in `web_accessible_resources`. Its `onMessage` listener is registered synchronously and awaits the modules inside.
 - Bridge readiness has two levels: `WPP.isReady` (modules hooked, also true on the QR login screen) and `WPP.isFullReady` (logged in, safe to send). Status uses the first to tell "not logged in" apart from "engine broken"; send commands wait for the second.
+- Recipient draft is a list of `{key, kind, chatId, number, name, vars}` in `chrome.storage.local` (`KEYS.RECIPIENTS_DRAFT`). Dedupe key is `n:<number>` when a number is known, else `id:<chatId>`, so a picked contact and the same typed number collapse.
+- Phone rules are covered by quick Node checks: `src/shared/phone.js` has no chrome APIs, so `node -e "import('./src/shared/phone.js').then(m => console.log(m.normalizePhone('09876543210')))"` works.
 
 ## Commands
 

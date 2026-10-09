@@ -27,7 +27,52 @@
 
   <main>
     <section class="panel active" data-panel="recipients" role="tabpanel">
-      <p class="placeholder">Recipients: paste numbers, import CSV/Excel, pick contacts and groups. <em>Coming in Phase 2.</em></p>
+      <div class="card">
+        <label class="label" for="rcp-paste">Paste numbers</label>
+        <textarea id="rcp-paste" rows="4" placeholder="One per line:&#10;9876543210&#10;Riya Sharma, 9876543210"></textarea>
+        <div class="row">
+          <button id="rcp-paste-add" class="btn btn-small" type="button">Add</button>
+        </div>
+      </div>
+
+      <div class="button-row">
+        <button id="rcp-import" class="btn btn-secondary" type="button">Import CSV / Excel</button>
+        <button id="rcp-contacts" class="btn btn-secondary" type="button">Pick contacts</button>
+        <button id="rcp-groups" class="btn btn-secondary" type="button">Pick groups</button>
+        <input id="rcp-file" type="file" accept=".csv,.txt,.xlsx,.xls,.ods" hidden>
+      </div>
+
+      <div id="import-box" class="card" hidden>
+        <div class="row-between">
+          <strong id="map-file"></strong>
+          <span id="map-rows" class="muted"></span>
+        </div>
+        <label id="map-sheet-row" class="field" hidden>Sheet <select id="map-sheet"></select></label>
+        <label class="field">Phone column <select id="map-phone"></select></label>
+        <label class="field">Name column <select id="map-name"></select></label>
+        <p id="map-vars" class="muted small"></p>
+        <div class="row">
+          <button id="map-import" class="btn btn-small" type="button">Import</button>
+          <button id="map-cancel" class="btn btn-small btn-secondary" type="button">Cancel</button>
+        </div>
+      </div>
+
+      <p id="rcp-summary" class="summary" hidden></p>
+
+      <div class="row-between list-head">
+        <strong id="rcp-count">0 recipients</strong>
+        <button id="rcp-clear" class="link-btn" type="button" hidden>Clear all</button>
+      </div>
+      <p id="rcp-empty" class="muted">No recipients yet.</p>
+      <table id="rcp-table" class="table" hidden>
+        <tbody id="rcp-rows"></tbody>
+      </table>
+
+      <details id="rcp-invalid" class="invalid" hidden>
+        <summary id="rcp-invalid-count"></summary>
+        <ul id="rcp-invalid-list"></ul>
+        <button id="rcp-invalid-clear" class="link-btn" type="button">Clear invalid list</button>
+      </details>
     </section>
     <section class="panel" data-panel="message" role="tabpanel">
       <p class="placeholder">Message: text, variables, attachments, preview. <em>Coming in Phase 3.</em></p>
@@ -40,6 +85,20 @@
     </section>
   </main>
 
+  <div id="picker" class="overlay" hidden>
+    <div class="sheet">
+      <div class="row-between">
+        <strong id="picker-title"></strong>
+        <button id="picker-cancel" class="icon-btn" type="button" title="Close">✕</button>
+      </div>
+      <input id="picker-search" type="search" placeholder="Search…">
+      <label class="picker-row picker-all"><input id="picker-all" type="checkbox"> Select all shown</label>
+      <div id="picker-list" class="picker-list"></div>
+      <button id="picker-add" class="btn" type="button" disabled>Add 0 selected</button>
+    </div>
+  </div>
+
+  <script src="../../vendor/xlsx.full.min.js"></script>
   <script type="module" src="sidepanel.js"></script>
 </body>
 </html>

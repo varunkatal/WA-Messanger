@@ -8,11 +8,15 @@
 export const MSG = {
   GET_STATUS: 'GET_STATUS',
   OPEN_WHATSAPP: 'OPEN_WHATSAPP',
+  LIST_CONTACTS: 'LIST_CONTACTS',
+  LIST_GROUPS: 'LIST_GROUPS',
 };
 
 /** Content script ⇄ bridge (window.postMessage). */
 export const BRIDGE_CMD = {
   STATUS: 'status',
+  LIST_CONTACTS: 'listContacts',
+  LIST_GROUPS: 'listGroups',
 };
 
 export const SOURCE_EXT = 'WBS_EXT';
