@@ -5,7 +5,7 @@
  */
 import { MSG } from '../shared/messages.js';
 import { CAMPAIGN_DEFAULTS, MEDIA_LIMITS, MEDIA_MIME, log } from '../shared/config.js';
-import { KEYS, getLocal, setLocal, putMedia, getMedia, deleteMedia } from '../shared/storage.js';
+import { KEYS, getLocal, setLocal, putMedia, getMedia, deleteMedia, hasMediaData, putMediaData, removeMediaData } from '../shared/storage.js';
 import { buildParts, findVariables, renderTemplate } from '../shared/template.js';
 import { getRecipients } from './recipients.js';
 import { sendToWhatsApp } from './whatsapp.js';
@@ -16,7 +16,7 @@ import { sendToWhatsApp } from './whatsapp.js';
  * @property {string} name
  * @property {string} mime
  * @property {number} size
- * @property {'image'|'video'|'document'} type
+ * @property {'image'|'video'|'audio'|'document'} type
  * @property {string} caption
  */
 
@@ -29,8 +29,6 @@ let templates = [];
 let previewIndex = 0;
 /** mediaId → object URL for image thumbnails. */
 const thumbUrls = new Map();
-/** mediaId → data URL, so each file is converted once. */
-const dataUrlCache = new Map();
 /** The text field the variable chips insert into: the message or a caption, whichever was used last. */
 let lastField = null;
 
@@ -215,13 +213,14 @@ function onTemplateDelete() {
 /* ---------- Attachments ---------- */
 
 /**
- * How WhatsApp will show a file: photo, video, or document (everything else).
+ * How WhatsApp will show a file: photo, video, audio, or document (everything else).
  * @param {string} mime
- * @returns {'image'|'video'|'document'}
+ * @returns {'image'|'video'|'audio'|'document'}
  */
 function mediaKind(mime) {
   if (MEDIA_MIME.image.includes(mime)) return 'image';
   if (MEDIA_MIME.video.includes(mime)) return 'video';
+  if (MEDIA_MIME.audio.includes(mime)) return 'audio';
   return 'document';
 }
 
@@ -260,7 +259,6 @@ async function removeAttachment(id) {
   draft.attachments = draft.attachments.filter((a) => a.id !== id);
   if (thumbUrls.has(id)) URL.revokeObjectURL(thumbUrls.get(id));
   thumbUrls.delete(id);
-  dataUrlCache.delete(id);
   deleteMedia(id).catch((err) => log('deleting media failed', err));
   saveDraft();
   renderAttachments();
@@ -277,7 +275,7 @@ function moveAttachment(index, delta) {
   renderPreview();
 }
 
-const ICONS = { image: '🖼', video: '🎬', document: '📄' };
+const ICONS = { image: '🖼', video: '🎬', audio: '🎵', document: '📄' };
 
 /** Thumbnail for images, an icon for videos and documents. */
 async function thumbFor(a) {
@@ -329,8 +327,16 @@ async function renderAttachments() {
       requestAnimationFrame(() => autoGrow(caption)); // needs layout, so after it's in the page
       const head = document.createElement('div');
       head.className = 'row-between';
-      head.append(meta, makeFormatBar(caption));
-      info.append(name, head, caption);
+      if (a.type === 'audio') {
+        // WhatsApp shows no caption under audio, so don't offer one.
+        const note = document.createElement('small');
+        note.className = 'muted';
+        note.textContent = 'Audio is sent without a caption.';
+        info.append(name, meta, note);
+      } else {
+        head.append(meta, makeFormatBar(caption));
+        info.append(name, head, caption);
+      }
 
       const actions = document.createElement('div');
       actions.className = 'att-actions';
@@ -359,12 +365,14 @@ async function renderAttachments() {
 }
 
 /**
- * Reads an attachment as a data URL (cached per session).
+ * Copies an attachment from IndexedDB to chrome.storage as a data URL, where
+ * the content script (which can't read this page's IndexedDB) can read it.
+ * Does nothing if it's already there.
  * @param {string} mediaId
- * @returns {Promise<string>}
+ * @returns {Promise<boolean>} true if it was copied now
  */
-export async function getDataUrl(mediaId) {
-  if (dataUrlCache.has(mediaId)) return dataUrlCache.get(mediaId);
+export async function stageMedia(mediaId) {
+  if (await hasMediaData(mediaId)) return false;
   const rec = await getMedia(mediaId);
   if (!rec) throw new Error('An attachment file is missing. Remove it and add it again.');
   const dataUrl = await new Promise((resolve, reject) => {
@@ -373,8 +381,8 @@ export async function getDataUrl(mediaId) {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(rec.blob);
   });
-  dataUrlCache.set(mediaId, dataUrl);
-  return dataUrl;
+  await putMediaData(mediaId, dataUrl);
+  return true;
 }
 
 /* ---------- Preview ---------- */
@@ -482,16 +490,20 @@ async function onSendTest() {
     return;
   }
   btn.disabled = true;
+  // Files go through chrome.storage (big videos don't fit in one message);
+  // the ones copied just for this test are removed again afterwards.
+  const staged = [];
   try {
     for (const [i, part] of parts.entries()) {
       status.textContent = `Sending ${i + 1} of ${parts.length}…`;
-      const payload = part.kind === 'file' ? { ...part, dataUrl: await getDataUrl(part.mediaId) } : part;
-      await sendToWhatsApp(MSG.SEND_TEST, payload);
+      if (part.kind === 'file' && (await stageMedia(part.mediaId))) staged.push(part.mediaId);
+      await sendToWhatsApp(MSG.SEND_TEST, part);
     }
     status.textContent = 'Sent — check your own chat ("Message yourself") in WhatsApp.';
   } catch (err) {
     status.textContent = `Failed: ${err.message}`;
   } finally {
+    removeMediaData(staged).catch((err) => log('removing test media failed', err));
     btn.disabled = false;
   }
 }

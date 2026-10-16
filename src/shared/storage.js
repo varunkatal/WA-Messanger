@@ -31,6 +31,59 @@ export const campaignKey = (id) => `campaign:${id}`;
  */
 export const mediaKey = (id) => `media:${id}`;
 
+/**
+ * Big data URLs are split across several keys, because one storage write is
+ * one Chrome message and those top out near 64 MB (a 50 MB video is ~67 MB as
+ * a data URL). mediaKey(id) holds {chunks: n}; the parts are `media:<id>:<i>`.
+ */
+const MEDIA_CHUNK_CHARS = 8 * 1024 * 1024;
+const mediaChunkKey = (id, i) => `media:${id}:${i}`;
+
+/** @returns {Promise<boolean>} whether an attachment is already in chrome.storage */
+export async function hasMediaData(id) {
+  return (await getLocal(mediaKey(id), null)) != null;
+}
+
+/**
+ * Stores an attachment's data URL in chrome.storage, in chunks.
+ * @param {string} id
+ * @param {string} dataUrl
+ */
+export async function putMediaData(id, dataUrl) {
+  const chunks = Math.ceil(dataUrl.length / MEDIA_CHUNK_CHARS);
+  for (let i = 0; i < chunks; i++) {
+    await setLocal(mediaChunkKey(id, i), dataUrl.slice(i * MEDIA_CHUNK_CHARS, (i + 1) * MEDIA_CHUNK_CHARS));
+  }
+  await setLocal(mediaKey(id), { chunks }); // written last, so a half-written file never looks complete
+}
+
+/**
+ * @param {string} id
+ * @returns {Promise<string|null>} the data URL, or null if it isn't stored
+ */
+export async function getMediaData(id) {
+  const meta = await getLocal(mediaKey(id), null);
+  if (meta == null || typeof meta === 'string') return meta; // string: stored whole by an older version
+  const keys = Array.from({ length: meta.chunks }, (_, i) => mediaChunkKey(id, i));
+  const data = await chrome.storage.local.get(keys);
+  if (keys.some((k) => typeof data[k] !== 'string')) return null;
+  return keys.map((k) => data[k]).join('');
+}
+
+/**
+ * Removes attachments (all their chunks) from chrome.storage.
+ * @param {string[]} ids
+ */
+export async function removeMediaData(ids) {
+  const keys = [];
+  for (const id of ids) {
+    const meta = await getLocal(mediaKey(id), null);
+    keys.push(mediaKey(id));
+    for (let i = 0; i < (meta?.chunks ?? 0); i++) keys.push(mediaChunkKey(id, i));
+  }
+  if (keys.length) await chrome.storage.local.remove(keys);
+}
+
 /** Today's date in India (IST, UTC+5:30) as YYYY-MM-DD; the daily cap resets at IST midnight. */
 export function istDate(now = Date.now()) {
   return new Date(now + 330 * 60_000).toISOString().slice(0, 10);

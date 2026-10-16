@@ -5,7 +5,7 @@
  * XLSX is the SheetJS global, loaded by a classic <script> in sidepanel.html.
  */
 import { CAMPAIGN_DEFAULTS, log } from '../shared/config.js';
-import { KEYS, getLocal, setLocal, campaignKey, mediaKey } from '../shared/storage.js';
+import { KEYS, getLocal, setLocal, campaignKey, removeMediaData } from '../shared/storage.js';
 import { STATE_VIEW, countStatuses, startCampaign } from './campaign.js';
 
 const $ = (id) => document.getElementById(id);
@@ -68,8 +68,9 @@ async function remove(c) {
   const index = (await getLocal(KEYS.CAMPAIGN_INDEX, [])).filter((id) => id !== c.id);
   const others = index.length ? Object.values(await chrome.storage.local.get(index.map(campaignKey))) : [];
   const stillUsed = new Set(others.flatMap((o) => o.message.attachments.map((a) => a.id)));
-  const orphanMedia = c.message.attachments.filter((a) => !stillUsed.has(a.id)).map((a) => mediaKey(a.id));
-  await chrome.storage.local.remove([campaignKey(c.id), ...orphanMedia]);
+  const orphanMedia = c.message.attachments.filter((a) => !stillUsed.has(a.id)).map((a) => a.id);
+  await chrome.storage.local.remove(campaignKey(c.id));
+  await removeMediaData(orphanMedia);
   await setLocal(KEYS.CAMPAIGN_INDEX, index);
   if ((await getLocal(KEYS.ACTIVE_CAMPAIGN, null)) === c.id) await chrome.storage.local.remove(KEYS.ACTIVE_CAMPAIGN);
   expanded.delete(c.id);

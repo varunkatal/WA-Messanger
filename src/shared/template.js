@@ -34,7 +34,7 @@ export function findVariables(text) {
 
 /**
  * @typedef {{kind: 'text', text: string}} TextPart
- * @typedef {{kind: 'file', mediaId: string, type: 'image'|'video'|'document', filename: string, mimetype: string, caption: string}} FilePart
+ * @typedef {{kind: 'file', mediaId: string, type: 'image'|'video'|'audio'|'document', filename: string, mimetype: string, caption: string}} FilePart
  */
 
 /**
@@ -53,13 +53,13 @@ export function buildParts(message, vars, { keepMissing = false, captionMax = CA
     type: a.type,
     filename: a.name,
     mimetype: a.mime,
-    caption: render(a.caption),
+    caption: a.type === 'audio' ? '' : render(a.caption), // WhatsApp audio has no caption
   }));
   const text = render(message.text);
   if (!text) return files;
 
   const first = files[0];
-  if (message.textAsCaption && first) {
+  if (message.textAsCaption && first && first.type !== 'audio') {
     const combined = first.caption ? `${text}\n\n${first.caption}` : text;
     if (combined.length <= captionMax) {
       first.caption = combined;

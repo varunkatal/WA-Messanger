@@ -131,7 +131,7 @@
     /**
      * @param {string} chatId
      * @param {string} dataUrl
-     * @param {{type: 'image'|'video'|'document', caption?: string, filename: string, mimetype: string}} opts
+     * @param {{type: 'image'|'video'|'audio'|'document', caption?: string, filename: string, mimetype: string}} opts
      */
     async [CMD.SEND_FILE](chatId, dataUrl, opts) {
       return sendOutcome(await getWPP().chat.sendFileMessage(chatId, dataUrl, { ...opts, ...SEND_OPTIONS }));

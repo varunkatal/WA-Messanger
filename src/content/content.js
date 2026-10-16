@@ -109,6 +109,7 @@
     const { BRIDGE_CMD } = await modulesReady;
     const s = await callBridge(BRIDGE_CMD.STATUS, [], 5_000);
     if (!s.me) throw new Error('Log in to WhatsApp Web first.');
+    if (part.kind === 'file') part = { ...part, dataUrl: await getMediaDataUrl(part.mediaId, false) };
     return sendPart(s.me, part);
   }
 
@@ -159,12 +160,16 @@
     if (campaign.log.length > CAMPAIGN_LOG_MAX) campaign.log.splice(0, campaign.log.length - CAMPAIGN_LOG_MAX);
   }
 
-  async function getMediaDataUrl(mediaId) {
+  /**
+   * @param {string} mediaId
+   * @param {boolean} [cache] false for test sends, whose files are removed right after
+   */
+  async function getMediaDataUrl(mediaId, cache = true) {
     if (mediaCache.has(mediaId)) return mediaCache.get(mediaId);
-    const { mediaKey, getLocal } = await modulesReady;
-    const dataUrl = await getLocal(mediaKey(mediaId), null);
+    const { getMediaData } = await modulesReady;
+    const dataUrl = await getMediaData(mediaId);
     if (!dataUrl) throw new Error('Attachment file is missing — start a new campaign.');
-    mediaCache.set(mediaId, dataUrl);
+    if (cache) mediaCache.set(mediaId, dataUrl);
     return dataUrl;
   }
 

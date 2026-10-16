@@ -13,7 +13,8 @@ export const DEFAULT_COUNTRY_CODE = '91';
 /** Timeouts (ms) for content script → bridge calls. */
 export const TIMEOUTS = {
   bridgeDefault: 15_000,
-  bridgeMedia: 60_000,
+  /** Sends (text and files): a 50 MB video can take minutes to upload on a slow connection. */
+  bridgeMedia: 300_000,
   /** If WPP is not ready this long after page load, report an engine error. */
   engineReady: 60_000,
 };
@@ -44,23 +45,28 @@ export const SAFETY_WARN = {
 };
 
 /**
- * Attachment size limits in bytes. Documents are capped at 40 MB even though
- * WhatsApp allows more: files travel to the WhatsApp tab as data URLs (~33%
- * bigger than the file) through Chrome messaging, which tops out near 64 MB.
+ * Attachment size limits in bytes. Files travel to the WhatsApp tab as data
+ * URLs (~33% bigger than the file) through chrome.storage in chunks (see
+ * storage.js putMediaData), so these aren't bound by Chrome's 64 MB message
+ * limit. The whole file is still held in memory while sending, so keep them
+ * moderate. WhatsApp checks its own limits too (WA-JS reports "file too large").
  */
 export const MEDIA_LIMITS = {
   image: 5 * 1024 * 1024,
-  video: 16 * 1024 * 1024,
+  video: 50 * 1024 * 1024,
+  audio: 16 * 1024 * 1024,
   document: 40 * 1024 * 1024,
 };
 
 /**
- * File types WhatsApp shows inline as photo / video. Anything else (PDF, Word,
- * GIF, MOV…) is sent as a document, which always works.
+ * File types WhatsApp shows inline as photo / video / audio (MP3, M4A, AAC,
+ * OGG, AMR). Anything else (PDF, Word, GIF, MOV, WAV…) is sent as a document,
+ * which always works.
  */
 export const MEDIA_MIME = {
   image: ['image/jpeg', 'image/png', 'image/webp'],
   video: ['video/mp4', 'video/3gpp'],
+  audio: ['audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/opus', 'audio/amr'],
 };
 
 /** Longer text than this is sent as its own message instead of as a caption. */

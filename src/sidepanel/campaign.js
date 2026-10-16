@@ -7,10 +7,10 @@
  */
 import { MSG } from '../shared/messages.js';
 import { CAMPAIGN_DEFAULTS, SAFETY_WARN, log } from '../shared/config.js';
-import { KEYS, getLocal, setLocal, campaignKey, mediaKey, istDate } from '../shared/storage.js';
+import { KEYS, getLocal, setLocal, campaignKey, istDate } from '../shared/storage.js';
 import { buildParts } from '../shared/template.js';
 import { getRecipients } from './recipients.js';
-import { getMessage, getDataUrl } from './composer.js';
+import { getMessage, stageMedia } from './composer.js';
 import { sendToWhatsApp } from './whatsapp.js';
 
 const $ = (id) => document.getElementById(id);
@@ -181,10 +181,7 @@ export async function startCampaign({ name, recipients, message, settings: s }) 
 
   // The content script can't read this page's IndexedDB, so attachments go to
   // chrome.storage as data URLs (once per file; retries reuse them).
-  for (const a of message.attachments) {
-    const key = mediaKey(a.id);
-    if (!(await getLocal(key, null))) await setLocal(key, await getDataUrl(a.id));
-  }
+  for (const a of message.attachments) await stageMedia(a.id);
 
   const now = Date.now();
   const id = `c${now}`;

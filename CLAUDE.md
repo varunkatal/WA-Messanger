@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-This file is the design spec; the phase plan is in `ROADMAP.md`. Phases 1–5 (connection, recipients, composer, campaign engine, reports) are built; Phase 6 (polish) is next. Vendored: WA-JS 4.6.1, SheetJS 0.20.3.
+This file is the design spec; the phase plan is in `ROADMAP.md`. Phases 1–5 (connection, recipients, composer, campaign engine, reports) are built; Phase 6 (polish) is next. Vendored: WA-JS 4.7.1, SheetJS 0.20.3.
 
 Implementation notes not obvious from the spec:
 - `content.js` loads `src/shared/*.js` via dynamic `import(chrome.runtime.getURL(...))`, which is why those files are in `web_accessible_resources`. Its `onMessage` listener is registered synchronously and awaits the modules inside.
 - Bridge readiness has two levels: `WPP.isReady` (modules hooked, also true on the QR login screen) and `WPP.isFullReady` (logged in, safe to send). Status uses the first to tell "not logged in" apart from "engine broken"; send commands wait for the second.
 - Recipient draft is a list of `{key, kind, chatId, number, name, vars}` in `chrome.storage.local` (`KEYS.RECIPIENTS_DRAFT`). Dedupe key is `n:<number>` when a number is known, else `id:<chatId>`, so a picked contact and the same typed number collapse.
-- Attachments: Blobs live in the side panel's IndexedDB (`wbs` / `media`). The content script can't read that origin, so on campaign start each file is copied once to `chrome.storage.local` as a data URL under `media:<id>`; Reports → Delete removes those no other campaign uses.
+- Attachments: Blobs live in the side panel's IndexedDB (`wbs` / `media`). The content script can't read that origin, so on campaign start each file is copied once to `chrome.storage.local` as a data URL, chunked: `media:<id>` = `{chunks}`, parts at `media:<id>:<i>` (`putMediaData`/`getMediaData` in storage.js; old whole-string values still read). Send test stages files the same way and removes them after. Reports → Delete removes those no other campaign uses.
 - Campaigns: each stored at `campaign:<id>`, ids listed in `KEYS.CAMPAIGN_INDEX`, the Send tab shows `KEYS.ACTIVE_CAMPAIGN`. The side panel only creates a campaign; after `CAMPAIGN_START` the content script owns it and writes it after every recipient. The panel re-renders from `storage.onChanged`.
 - Bridge sends use `markIsRead: false` so sending to a class group doesn't mark it read. WA-JS waits for the server ack by default.
 - The runner can be exercised in Node with a fake `window`/`chrome` (load `content.js` via `new Function`), since its shared modules are plain ESM.
@@ -25,7 +25,7 @@ There is no build step, package manager, linter or test runner (by design; see T
 
 ## Project summary
 
-A Manifest V3 Chrome extension that sends bulk WhatsApp messages through the user's own logged-in **WhatsApp Web** tab. Recipients can be phone numbers (typed, pasted, CSV/Excel), WhatsApp contacts, and WhatsApp groups. Messages can be text and/or images, videos and documents, each with an optional caption. Text supports personalisation variables like `{name}`.
+A Manifest V3 Chrome extension that sends bulk WhatsApp messages through the user's own logged-in **WhatsApp Web** tab. Recipients can be phone numbers (typed, pasted, CSV/Excel), WhatsApp contacts, and WhatsApp groups. Messages can be text and/or images, videos, audio and documents, each with an optional caption (not audio). Text supports personalisation variables like `{name}`.
 
 Owner: Varun (teacher, India). Main use: messaging students/parents and class groups. Default country code: **91**.
 
@@ -92,7 +92,7 @@ The service worker is thin: MV3 service workers get killed when idle, so **never
 
 ### Messaging protocol
 - Side panel ⇄ content script: `chrome.tabs.sendMessage(whatsAppTabId, {type, payload})` and `chrome.runtime.sendMessage` back. Progress also written to `chrome.storage.local` so the panel can rebuild state via `storage.onChanged` after being reopened.
-- Content script ⇄ bridge: `window.postMessage({source: "WBS_EXT", id, cmd, args}, "*")` → bridge replies `{source: "WBS_BRIDGE", id, ok, result | error}`. Use a request `id` and a promise map with a timeout (default 60 s for media). **Always check `event.source === window` and the `source` tag**; ignore everything else (WhatsApp posts its own messages).
+- Content script ⇄ bridge: `window.postMessage({source: "WBS_EXT", id, cmd, args}, "*")` → bridge replies `{source: "WBS_BRIDGE", id, ok, result | error}`. Use a request `id` and a promise map with a timeout (5 min for sends: big videos upload slowly). **Always check `event.source === window` and the `source` tag**; ignore everything else (WhatsApp posts its own messages).
 - Define all `type`/`cmd` strings in `src/shared/messages.js` (and mirror them in the bridge, which can't import modules).
 
 ### Bridge commands (WA-JS)
@@ -114,7 +114,7 @@ Chat IDs: individual = `<countrycode+number>@c.us`, group = `...@g.us`. **Do not
 ### Media handling
 - User picks files in side panel → store `Blob` in IndexedDB with `{id, name, mime, size, caption}`.
 - When sending, the side panel (or content script on request) converts to a data URL and passes it through messaging. Cache the data URL per campaign so each file is converted once.
-- Limits in `config.js`: image 5 MB, video 16 MB, document 40 MB (not 100: data URLs are ~33% bigger and Chrome messaging tops out near 64 MB). Reject larger files with a clear message.
+- Limits in `config.js`: image 5 MB, video 50 MB, audio 16 MB, document 40 MB. Data URLs are ~33% bigger and one Chrome message tops out near 64 MB, so media goes through `chrome.storage` in 8 MB chunks, never as one message. Reject larger files with a clear message.
 - Order per recipient: text message first (if any, and if no attachments carry the text), then each attachment with its caption. Option: "put text as caption of first attachment" (default ON — fewer messages).
 
 ### Phone normalisation (`phone.js`)
