@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>WhatsApp Bulk Sender</title>
+  <title>Bulk Sender</title>
   <link rel="stylesheet" href="sidepanel.css">
 </head>
 <body>
@@ -67,7 +67,11 @@
           </div>
           <label class="picker-row picker-all"><input id="picker-all" type="checkbox"> Select all shown</label>
           <div id="picker-list" class="picker-list"></div>
-          <button id="picker-add" class="btn btn-small" type="button" disabled>Add 0 selected</button>
+          <div class="row">
+            <button id="picker-add" class="btn btn-small" type="button" disabled>Add 0 selected</button>
+            <button id="picker-export" class="btn btn-small btn-secondary" type="button" hidden disabled>⬇ Export members</button>
+          </div>
+          <p id="picker-export-note" class="muted small" hidden>Export saves the ticked groups' members (name, number) to an Excel file for your records. Messaging people who haven't agreed to it can get your number banned.</p>
         </div>
 
         <div class="pane" data-pane="lists" hidden>
@@ -111,6 +115,12 @@
           <span class="row">
             <button id="att-add" class="icon-btn icon-lg" type="button" title="Attach photos, videos, audio or files">📎</button>
             <input id="att-file" type="file" multiple hidden>
+            <button id="rec-start" class="icon-btn icon-lg" type="button" title="Record a voice note">🎙</button>
+            <span id="rec-bar" class="rec-bar" hidden>
+              <span class="rec-dot"></span><span id="rec-time">0:00</span>
+              <button id="rec-stop" class="btn btn-small" type="button" title="Stop and attach">⏹ Stop</button>
+              <button id="rec-cancel" class="icon-btn" type="button" title="Discard recording">✕</button>
+            </span>
           </span>
         </div>
         <textarea id="msg-text" rows="6" placeholder="Type your message here… e.g. Dear {name},"></textarea>
@@ -124,7 +134,7 @@
         <p id="att-error" class="summary summary-err" hidden></p>
         <div id="att-list" class="att-list"></div>
         <label id="att-caption-opt" class="check"><input id="msg-as-caption" type="checkbox"> Put the text as caption of the first attachment</label>
-        <p class="muted small">📎 Photos (JPG, PNG, WebP) up to 5 MB, MP4 videos up to 50 MB, audio (MP3, M4A, AAC, OGG) up to 16 MB, other files as documents up to 40 MB.</p>
+        <p class="muted small">📎 Photos (JPG, PNG, WebP) up to 5 MB, MP4 videos up to 50 MB, audio (MP3, M4A, AAC, OGG) up to 16 MB, 🎙 voice notes up to 15 min, other files as documents up to 40 MB.</p>
 
         <details class="preview">
           <summary>Preview <span id="pv-who" class="muted small"></span></summary>

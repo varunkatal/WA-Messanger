@@ -7,10 +7,11 @@
 /** Side panel / service worker ⇄ content script (chrome.runtime / chrome.tabs messaging). */
 export const MSG = {
   GET_STATUS: 'GET_STATUS',
-  OPEN_WHATSAPP: 'OPEN_WHATSAPP',
   LIST_CONTACTS: 'LIST_CONTACTS',
   LIST_GROUPS: 'LIST_GROUPS',
-  /** payload: one message part (see template.js buildParts), files with `dataUrl` added. */
+  /** payload: {groupId} → members of one group, for "Export members". */
+  GROUP_MEMBERS: 'GROUP_MEMBERS',
+  /** payload: one message part (see template.js buildParts); files are read from chrome.storage by mediaId. */
   SEND_TEST: 'SEND_TEST',
   /** payload: {id} of a campaign already written to storage. */
   CAMPAIGN_START: 'CAMPAIGN_START',
@@ -24,6 +25,7 @@ export const BRIDGE_CMD = {
   STATUS: 'status',
   LIST_CONTACTS: 'listContacts',
   LIST_GROUPS: 'listGroups',
+  GROUP_MEMBERS: 'groupMembers',
   CHECK_NUMBER: 'checkNumber',
   SEND_TEXT: 'sendText',
   SEND_FILE: 'sendFile',
@@ -36,6 +38,7 @@ export const SOURCE_BRIDGE = 'WBS_BRIDGE';
 export const CONN = {
   NO_TAB: 'no_tab',             // no WhatsApp Web tab open
   NEEDS_RELOAD: 'needs_reload', // tab open but our content script isn't in it
+  ASLEEP: 'asleep',             // Chrome discarded the tab (Memory Saver)
   LOADING: 'loading',           // WPP still starting up
   ENGINE_ERROR: 'engine_error', // WPP never became ready
   LOGGED_OUT: 'logged_out',

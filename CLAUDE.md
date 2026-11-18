@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-This file is the design spec; the phase plan is in `ROADMAP.md`. Phases 1–5 (connection, recipients, composer, campaign engine, reports) are built; Phase 6 (polish) is next. Vendored: WA-JS 4.7.1, SheetJS 0.20.3.
+This file is the design spec; the phase plan is in `ROADMAP.md`. Phases 1–5 (connection, recipients, composer, campaign engine, reports) are built; Phase 6 (polish) is next. Vendored: WA-JS 4.8.2, SheetJS 0.20.3.
 
 Implementation notes not obvious from the spec:
 - `content.js` loads `src/shared/*.js` via dynamic `import(chrome.runtime.getURL(...))`, which is why those files are in `web_accessible_resources`. Its `onMessage` listener is registered synchronously and awaits the modules inside.
@@ -12,6 +12,9 @@ Implementation notes not obvious from the spec:
 - Recipient draft is a list of `{key, kind, chatId, number, name, vars}` in `chrome.storage.local` (`KEYS.RECIPIENTS_DRAFT`). Dedupe key is `n:<number>` when a number is known, else `id:<chatId>`, so a picked contact and the same typed number collapse.
 - Attachments: Blobs live in the side panel's IndexedDB (`wbs` / `media`). The content script can't read that origin, so on campaign start each file is copied once to `chrome.storage.local` as a data URL, chunked: `media:<id>` = `{chunks}`, parts at `media:<id>:<i>` (`putMediaData`/`getMediaData` in storage.js; old whole-string values still read). Send test stages files the same way and removes them after. Reports → Delete removes those no other campaign uses.
 - Campaigns: each stored at `campaign:<id>`, ids listed in `KEYS.CAMPAIGN_INDEX`, the Send tab shows `KEYS.ACTIVE_CAMPAIGN`. The side panel only creates a campaign; after `CAMPAIGN_START` the content script owns it and writes it after every recipient. The panel re-renders from `storage.onChanged`.
+- Voice notes: 🎙 records WebM/Opus with `MediaRecorder`; `src/shared/webm-to-ogg.js` re-boxes it as OGG/Opus (no re-encode), checked with `decodeAudioData`, then attached with `ptt: true` → sent with `isPtt` (WA-JS builds the waveform). The side panel can't show the mic prompt, so on `NotAllowedError` it opens `src/permission/mic.html` in a tab once. Converter can be tested by recording in headless Chrome with `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`.
+- Group export (Groups picker → ⬇ Export members): one .xlsx, columns `Group | Number | Name | WhatsApp name | Admin | Note`. Number must stay before "WhatsApp name" — the import's `guessColumn` takes the first header matching the phone pattern (which includes "whatsapp"). Groups already added as recipients stay tickable in Groups mode; "Add" counts only new ones. For records only — CLAUDE.md's out-of-scope rule on messaging scraped numbers still applies.
+- Staying connected: the service worker sets `autoDiscardable: false` on WhatsApp tabs (Memory Saver would otherwise discard them and kill the runner). The bridge's 60 s engine timeout restarts when the tab becomes visible, since Chrome throttles background tabs. The header button reloads the tab in Engine-error / asleep / needs-reload states; it calls `chrome.tabs` directly from the panel (`showWhatsApp` in `whatsapp.js`), not via the service worker.
 - Bridge sends use `markIsRead: false` so sending to a class group doesn't mark it read. WA-JS waits for the server ack by default.
 - The runner can be exercised in Node with a fake `window`/`chrome` (load `content.js` via `new Function`), since its shared modules are plain ESM.
 - Phone rules are covered by quick Node checks: `src/shared/phone.js` has no chrome APIs, so `node -e "import('./src/shared/phone.js').then(m => console.log(m.normalizePhone('09876543210')))"` works.
@@ -25,7 +28,7 @@ There is no build step, package manager, linter or test runner (by design; see T
 
 ## Project summary
 
-A Manifest V3 Chrome extension that sends bulk WhatsApp messages through the user's own logged-in **WhatsApp Web** tab. Recipients can be phone numbers (typed, pasted, CSV/Excel), WhatsApp contacts, and WhatsApp groups. Messages can be text and/or images, videos, audio and documents, each with an optional caption (not audio). Text supports personalisation variables like `{name}`.
+A Manifest V3 Chrome extension that sends bulk WhatsApp messages through the user's own logged-in **WhatsApp Web** tab. Recipients can be phone numbers (typed, pasted, CSV/Excel), WhatsApp contacts, and WhatsApp groups. Messages can be text and/or images, videos, audio, recorded voice notes and documents, each with an optional caption (not audio). Text supports personalisation variables like `{name}`.
 
 Owner: Varun (teacher, India). Main use: messaging students/parents and class groups. Default country code: **91**.
 
@@ -82,7 +85,7 @@ Owner: Varun (teacher, India). Main use: messaging students/parents and class gr
 The service worker is thin: MV3 service workers get killed when idle, so **never keep campaign state only in the service worker.**
 
 ### manifest.json essentials
-- `permissions`: `storage`, `sidePanel`, `tabs`, `scripting`, `unlimitedStorage`
+- `permissions`: `storage`, `sidePanel`, `tabs`, `unlimitedStorage`
 - `host_permissions`: `https://web.whatsapp.com/*`
 - `side_panel.default_path`: `src/sidepanel/sidepanel.html`
 - `content_scripts`:
@@ -103,6 +106,7 @@ Wait for readiness with `WPP.webpack.onReady(...)` / `WPP.isReady`, and check lo
 | `status` | `WPP.isReady`, `WPP.conn.isAuthenticated()`, `WPP.conn.getMyUserId()` |
 | `listGroups` | `WPP.chat.list({ onlyGroups: true })` → `[{id, name, participantsCount}]` |
 | `listContacts` | `WPP.contact.list({ onlyMyContacts: true })` → `[{id, name, number}]` |
+| `groupMembers` | `WPP.group.getParticipants(groupId)`; `@lid` members → `WPP.contact.getPnLidEntry` (number only if WhatsApp has it locally, else `null`), names via `WPP.contact.get` → `[{id, number, name, pushname, isAdmin}]`, without me |
 | `checkNumber` | `WPP.contact.queryExists(number + "@c.us")` → wid or null |
 | `sendText` | `WPP.chat.sendTextMessage(chatId, text, { createChat: true })` |
 | `sendFile` | `WPP.chat.sendFileMessage(chatId, dataUrl, { type, caption, filename, mimetype, createChat: true })` with `type` = `image` / `video` / `document` |
@@ -158,5 +162,5 @@ Tabs: **Send · Reports**. The Send tab is one screen in Premium Sender Pro's or
 
 ## Out of scope
 - WhatsApp Business API / paid gateways
-- Chrome Web Store publishing (install as unpacked / zip)
+- Public Chrome Web Store listing (published as **Unlisted**, name "Bulk Sender"; privacy policy in `PRIVACY.md`). Each Store update needs a higher `version` and a new review, so urgent fixes go through Load unpacked first.
 - Scraping numbers from groups for messaging strangers

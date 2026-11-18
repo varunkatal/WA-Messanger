@@ -13,6 +13,7 @@
     STATUS: 'status',
     LIST_CONTACTS: 'listContacts',
     LIST_GROUPS: 'listGroups',
+    GROUP_MEMBERS: 'groupMembers',
     CHECK_NUMBER: 'checkNumber',
     SEND_TEXT: 'sendText',
     SEND_FILE: 'sendFile',
@@ -21,7 +22,12 @@
   const SEND_OPTIONS = { createChat: true, markIsRead: false };
   const ENGINE_READY_TIMEOUT_MS = 60_000;
 
-  const loadedAt = Date.now();
+  // When we started waiting for WA-JS. A background tab is throttled by Chrome and
+  // may take minutes to start WhatsApp, so the clock restarts when the tab is shown.
+  let waitingSince = Date.now();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !isLoaded()) waitingSince = Date.now();
+  });
 
   const getWPP = () => window.WPP;
   // isReady: WhatsApp's modules are hooked (true even on the QR login screen).
@@ -82,7 +88,7 @@
         ready: isReady(),
         authenticated,
         me,
-        engineTimedOut: !loaded && Date.now() - loadedAt > ENGINE_READY_TIMEOUT_MS,
+        engineTimedOut: !loaded && Date.now() - waitingSince > ENGINE_READY_TIMEOUT_MS,
       };
     },
 
@@ -118,6 +124,41 @@
       });
     },
 
+    /**
+     * Members of one group → [{id, number, name, pushname, isAdmin}], without me.
+     * Newer WhatsApp lists some members by a private id (…@lid); their number
+     * is only known if WhatsApp has it locally (e.g. a saved contact), else null.
+     */
+    async [CMD.GROUP_MEMBERS](groupId) {
+      const WPP = getWPP();
+      const mine = new Set([WPP.conn.getMyUserId()?._serialized, WPP.conn.getMyUserLid?.()?._serialized].filter(Boolean));
+      const participants = await WPP.group.getParticipants(groupId);
+      const members = [];
+      for (const p of participants) {
+        const id = p.id;
+        if (mine.has(id._serialized)) continue;
+        let number = id.server === 'c.us' ? id.user : null;
+        let contact = null;
+        try {
+          if (id.server === 'lid') {
+            const entry = await WPP.contact.getPnLidEntry(id); // local cache only for lids
+            number = entry?.phoneNumber?.user ?? null;
+            contact = entry?.contact ?? null;
+          } else {
+            contact = await WPP.contact.get(id);
+          }
+        } catch { /* keep what we have for this member */ }
+        members.push({
+          id: id._serialized,
+          number,
+          name: contact?.name || '',
+          pushname: contact?.pushname || '',
+          isAdmin: Boolean(p.isAdmin || p.isSuperAdmin),
+        });
+      }
+      return members;
+    },
+
     /** Is this number on WhatsApp? → its chat id ("…@c.us") or null. */
     async [CMD.CHECK_NUMBER](number) {
       const res = await getWPP().contact.queryExists(`${number}@c.us`);
@@ -130,11 +171,11 @@
 
     /**
      * @param {string} chatId
-     * @param {string} dataUrl
-     * @param {{type: 'image'|'video'|'audio'|'document', caption?: string, filename: string, mimetype: string}} opts
+     * @param {File} file
+     * @param {{type: 'image'|'video'|'audio'|'document', caption?: string, filename: string, mimetype: string, isPtt?: boolean}} opts
      */
-    async [CMD.SEND_FILE](chatId, dataUrl, opts) {
-      return sendOutcome(await getWPP().chat.sendFileMessage(chatId, dataUrl, { ...opts, ...SEND_OPTIONS }));
+    async [CMD.SEND_FILE](chatId, file, opts) {
+      return sendOutcome(await getWPP().chat.sendFileMessage(chatId, file, { ...opts, ...SEND_OPTIONS }));
     },
   };
 

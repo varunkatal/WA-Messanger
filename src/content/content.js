@@ -90,9 +90,9 @@
 
   /**
    * Sends one message part (see template.js buildParts) to a chat.
-   * File parts must carry `dataUrl`.
+   * File parts must carry `blob` (see getMediaBlob).
    * @param {string} chatId
-   * @param {{kind: 'text', text: string} | {kind: 'file', dataUrl: string, type: string, filename: string, mimetype: string, caption: string}} part
+   * @param {{kind: 'text', text: string} | {kind: 'file', blob: Blob, type: string, filename: string, mimetype: string, caption: string, ptt?: boolean}} part
    */
   async function sendPart(chatId, part) {
     const { BRIDGE_CMD, TIMEOUTS } = await modulesReady;
@@ -101,7 +101,11 @@
     }
     const opts = { type: part.type, filename: part.filename, mimetype: part.mimetype };
     if (part.caption) opts.caption = part.caption;
-    return callBridge(BRIDGE_CMD.SEND_FILE, [chatId, part.dataUrl, opts], TIMEOUTS.bridgeMedia);
+    if (part.ptt) opts.isPtt = true; // voice note: WA-JS adds the waveform
+    // A File, not a data URL: WA-JS's data-URL check rejects types with
+    // parameters like "audio/ogg; codecs=opus" (invalid_data_url).
+    const file = new File([part.blob], part.filename, { type: part.mimetype });
+    return callBridge(BRIDGE_CMD.SEND_FILE, [chatId, file, opts], TIMEOUTS.bridgeMedia);
   }
 
   /** "Send test to myself": sends one part to the logged-in user's own chat. */
@@ -109,7 +113,7 @@
     const { BRIDGE_CMD } = await modulesReady;
     const s = await callBridge(BRIDGE_CMD.STATUS, [], 5_000);
     if (!s.me) throw new Error('Log in to WhatsApp Web first.');
-    if (part.kind === 'file') part = { ...part, dataUrl: await getMediaDataUrl(part.mediaId, false) };
+    if (part.kind === 'file') part = { ...part, blob: await getMediaBlob(part.mediaId, false) };
     return sendPart(s.me, part);
   }
 
@@ -121,7 +125,7 @@
   let looping = false;
   /** Cancels the current delay early (pause/stop). */
   let wakeUp = null;
-  /** mediaId → data URL, read from chrome.storage once per page load. */
+  /** mediaId → Blob, read from chrome.storage and decoded once per page load. */
   const mediaCache = new Map();
 
   const randomBetween = (min, max) => min + Math.random() * (max - min);
@@ -164,13 +168,30 @@
    * @param {string} mediaId
    * @param {boolean} [cache] false for test sends, whose files are removed right after
    */
-  async function getMediaDataUrl(mediaId, cache = true) {
+  async function getMediaBlob(mediaId, cache = true) {
     if (mediaCache.has(mediaId)) return mediaCache.get(mediaId);
     const { getMediaData } = await modulesReady;
     const dataUrl = await getMediaData(mediaId);
     if (!dataUrl) throw new Error('Attachment file is missing — start a new campaign.');
-    if (cache) mediaCache.set(mediaId, dataUrl);
-    return dataUrl;
+    const blob = dataUrlToBlob(dataUrl);
+    if (cache) mediaCache.set(mediaId, blob);
+    return blob;
+  }
+
+  /**
+   * Decodes a base64 data URL to a Blob ourselves (fetch() of data: URLs can be
+   * blocked by WhatsApp's page CSP).
+   * @param {string} dataUrl
+   * @returns {Blob}
+   */
+  function dataUrlToBlob(dataUrl) {
+    const comma = dataUrl.indexOf(',');
+    const header = dataUrl.slice(5, comma); // after "data:"
+    if (comma < 0 || !header.endsWith(';base64')) throw new Error('Attachment file is damaged — remove it and add it again.');
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: header.slice(0, -';base64'.length) });
   }
 
   /** Recipients sent today (IST) across all campaigns. */
@@ -202,7 +223,7 @@
     const parts = buildParts(campaign.message, r.vars || {});
     if (!parts.length) throw new Error('Message is empty for this recipient.');
     for (const part of parts) {
-      const full = part.kind === 'file' ? { ...part, dataUrl: await getMediaDataUrl(part.mediaId) } : part;
+      const full = part.kind === 'file' ? { ...part, blob: await getMediaBlob(part.mediaId) } : part;
       await sendPart(chatId, full);
     }
     return 'sent';
@@ -363,7 +384,7 @@
 
   // Registered synchronously so early messages from the side panel aren't lost.
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    modulesReady.then(({ MSG, BRIDGE_CMD }) => {
+    modulesReady.then(({ MSG, BRIDGE_CMD, TIMEOUTS }) => {
       const id = msg?.payload?.id;
       switch (msg?.type) {
         case MSG.GET_STATUS:
@@ -374,6 +395,9 @@
           break;
         case MSG.LIST_GROUPS:
           wrap(callBridge(BRIDGE_CMD.LIST_GROUPS)).then(sendResponse);
+          break;
+        case MSG.GROUP_MEMBERS: // big groups can take a while to load
+          wrap(callBridge(BRIDGE_CMD.GROUP_MEMBERS, [msg.payload.groupId], TIMEOUTS.bridgeMedia)).then(sendResponse);
           break;
         case MSG.SEND_TEST:
           wrap(sendTestPart(msg.payload)).then(sendResponse);

@@ -69,6 +69,16 @@ export const MEDIA_MIME = {
   audio: ['audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg', 'audio/opus', 'audio/amr'],
 };
 
+/**
+ * Voice notes recorded in the side panel. Chrome records WebM/Opus; it's
+ * re-boxed as OGG/Opus (webm-to-ogg.js), which is what WhatsApp voice notes are.
+ * 15 min of speech is about 4 MB, well under the audio limit.
+ */
+export const VOICE_NOTE = {
+  maxSec: 15 * 60,
+  recorderMime: 'audio/webm;codecs=opus',
+};
+
 /** Longer text than this is sent as its own message instead of as a caption. */
 export const CAPTION_MAX_CHARS = 1024;
 

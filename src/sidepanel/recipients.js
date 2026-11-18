@@ -271,6 +271,8 @@ function setMode(next) {
   const pane = next === 'groups' || next === 'contacts' ? 'pick' : next;
   document.querySelectorAll('.pane').forEach((p) => { p.hidden = p.dataset.pane !== pane; });
   refreshPicker = null;
+  $('picker-export').hidden = next !== 'groups';
+  $('picker-export-note').hidden = next !== 'groups';
   if (pane === 'pick') showSource(next);
 }
 
@@ -281,6 +283,7 @@ function setPickerMessage(text) {
   p.textContent = text;
   $('picker-list').replaceChildren(p);
   $('picker-add').disabled = true;
+  $('picker-export').disabled = true;
 }
 
 /** WhatsApp groups → picker items carrying the recipient to add. */
@@ -341,6 +344,11 @@ function showPicker(items) {
   const search = $('picker-search');
   const selectAll = $('picker-all');
   const addBtn = $('picker-add');
+  const exportBtn = $('picker-export');
+  // Groups can be ticked for export even when already added as recipients.
+  const isGroups = mode === 'groups';
+  exportBtn.hidden = !isGroups;
+  $('picker-export-note').hidden = !isGroups;
   search.value = '';
 
   const added = () => new Set(state.list.map((r) => r.key));
@@ -349,13 +357,23 @@ function showPicker(items) {
     return q ? items.filter((it) => `${it.label} ${it.sub}`.toLowerCase().includes(q)) : items;
   };
   const selectable = () => {
+    if (isGroups) return visible();
     const have = added();
     return visible().filter((it) => !have.has(it.recipient.key));
   };
+  const toAdd = () => {
+    const have = added();
+    return items.filter((it) => selected.has(it.recipient.key) && !have.has(it.recipient.key));
+  };
 
   const updateFooter = () => {
-    addBtn.textContent = `Add ${selected.size} selected`;
-    addBtn.disabled = selected.size === 0;
+    const n = toAdd().length;
+    addBtn.textContent = `Add ${n} selected`;
+    addBtn.disabled = n === 0;
+    if (!exportBtn.dataset.busy) {
+      exportBtn.textContent = selected.size ? `⬇ Export members (${selected.size})` : '⬇ Export members';
+      exportBtn.disabled = selected.size === 0;
+    }
     const sel = selectable();
     selectAll.checked = sel.length > 0 && sel.every((it) => selected.has(it.recipient.key));
   };
@@ -370,8 +388,8 @@ function showPicker(items) {
       row.className = `picker-row${isAdded ? ' picker-added' : ''}`;
       const cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = isAdded || selected.has(key);
-      cb.disabled = isAdded;
+      cb.checked = selected.has(key) || (isAdded && !isGroups);
+      cb.disabled = isAdded && !isGroups;
       cb.addEventListener('change', () => {
         cb.checked ? selected.add(key) : selected.delete(key);
         updateFooter();
@@ -397,13 +415,74 @@ function showPicker(items) {
     renderList();
   };
   addBtn.onclick = () => {
-    const picked = items.filter((it) => selected.has(it.recipient.key)).map((it) => structuredClone(it.recipient));
+    const picked = toAdd().map((it) => structuredClone(it.recipient));
     selected.clear();
     commit(addRecipients(picked)); // re-renders the list, which calls refreshPicker
   };
+  exportBtn.onclick = () => exportGroupMembers(items.filter((it) => selected.has(it.recipient.key)), exportBtn)
+      .catch((err) => showSummary(`Export failed: ${err.message}`, 'err'))
+      .finally(updateFooter);
 
   refreshPicker = renderList;
   renderList();
+}
+
+/* ---------- Export group members ---------- */
+
+/**
+ * Downloads the members of the given groups as one Excel file. Column order
+ * matters: Number comes before "WhatsApp name" so re-importing the file picks
+ * Number as the phone column (guessColumn takes the first match).
+ * @param {{label: string, recipient: Recipient}[]} groups picker items
+ * @param {HTMLButtonElement} btn shows progress
+ */
+async function exportGroupMembers(groups, btn) {
+  if (!groups.length) return;
+  btn.dataset.busy = '1';
+  btn.disabled = true;
+  const rows = [];
+  const errors = [];
+  let hidden = 0;
+  try {
+    for (const [i, g] of groups.entries()) {
+      btn.textContent = `Exporting ${i + 1} of ${groups.length}…`;
+      let members;
+      try {
+        members = await sendToWhatsApp(MSG.GROUP_MEMBERS, { groupId: g.recipient.chatId });
+      } catch (err) {
+        errors.push(`${g.label}: ${err.message}`);
+        continue;
+      }
+      for (const m of members) {
+        if (!m.number) hidden++;
+        rows.push({
+          Group: g.label,
+          Number: m.number ? `+${m.number}` : '',
+          Name: m.name || m.pushname || '',
+          'WhatsApp name': m.pushname || '',
+          Admin: m.isAdmin ? 'Yes' : '',
+          Note: m.number ? '' : 'Number hidden by WhatsApp',
+        });
+      }
+    }
+    if (rows.length) {
+      const sheet = XLSX.utils.json_to_sheet(rows);
+      sheet['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 24 }, { wch: 20 }, { wch: 6 }, { wch: 26 }];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, sheet, 'All members');
+      const date = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      const base = groups.length === 1 ? `${groups[0].label} members` : `Group members ${date}`;
+      XLSX.writeFile(wb, `${base.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Group members'}.xlsx`);
+    }
+    const ok = groups.length - errors.length;
+    const parts = [];
+    if (ok) parts.push(`Exported ${rows.length} member${rows.length === 1 ? '' : 's'} from ${ok} group${ok === 1 ? '' : 's'}.`);
+    if (hidden) parts.push(`${hidden} number${hidden === 1 ? ' is' : 's are'} hidden by WhatsApp (left blank).`);
+    if (errors.length) parts.push(`Failed: ${errors.join('; ')}`);
+    showSummary(parts.join(' '), errors.length && !ok ? 'err' : 'ok');
+  } finally {
+    delete btn.dataset.busy;
+  }
 }
 
 /* ---------- Saved lists ---------- */

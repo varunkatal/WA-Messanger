@@ -34,13 +34,13 @@ export function findVariables(text) {
 
 /**
  * @typedef {{kind: 'text', text: string}} TextPart
- * @typedef {{kind: 'file', mediaId: string, type: 'image'|'video'|'audio'|'document', filename: string, mimetype: string, caption: string}} FilePart
+ * @typedef {{kind: 'file', mediaId: string, type: 'image'|'video'|'audio'|'document', filename: string, mimetype: string, caption: string, ptt?: boolean}} FilePart
  */
 
 /**
  * Turns a message into what gets sent to one recipient, in order: text first
  * (unless it rides along as the first attachment's caption), then each attachment.
- * @param {{text: string, textAsCaption: boolean, attachments: {id: string, name: string, mime: string, type: string, caption: string}[]}} message
+ * @param {{text: string, textAsCaption: boolean, attachments: {id: string, name: string, mime: string, type: string, caption: string, ptt?: boolean}[]}} message
  * @param {Object<string,string>} vars
  * @param {{keepMissing?: boolean, captionMax?: number}} [opts]
  * @returns {(TextPart|FilePart)[]}
@@ -54,6 +54,7 @@ export function buildParts(message, vars, { keepMissing = false, captionMax = CA
     filename: a.name,
     mimetype: a.mime,
     caption: a.type === 'audio' ? '' : render(a.caption), // WhatsApp audio has no caption
+    ...(a.ptt ? { ptt: true } : {}),
   }));
   const text = render(message.text);
   if (!text) return files;

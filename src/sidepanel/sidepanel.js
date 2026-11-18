@@ -3,7 +3,7 @@
  */
 import { MSG, CONN } from '../shared/messages.js';
 import { STATUS_POLL_MS, log } from '../shared/config.js';
-import { findWhatsAppTab } from './whatsapp.js';
+import { findWhatsAppTab, showWhatsApp } from './whatsapp.js';
 import { initRecipients } from './recipients.js';
 import { initComposer } from './composer.js';
 import { initCampaign } from './campaign.js';
@@ -28,15 +28,17 @@ function initTabs() {
 const STATUS_VIEW = {
   [CONN.NO_TAB]: { text: 'Open WhatsApp Web', style: 'pill-warn', button: 'Open WhatsApp' },
   [CONN.NEEDS_RELOAD]: { text: 'Reload WhatsApp tab', style: 'pill-warn', button: 'Reload tab' },
+  [CONN.ASLEEP]: { text: 'Tab asleep', style: 'pill-warn', button: 'Reload tab' },
   [CONN.LOADING]: { text: 'Loading…', style: 'pill-muted', button: 'Go to WhatsApp' },
   [CONN.LOGGED_OUT]: { text: 'Not logged in', style: 'pill-warn', button: 'Go to WhatsApp' },
-  [CONN.ENGINE_ERROR]: { text: 'Engine not ready', style: 'pill-err', button: 'Go to WhatsApp' },
+  [CONN.ENGINE_ERROR]: { text: 'Engine not ready', style: 'pill-err', button: 'Reload WhatsApp' },
   [CONN.CONNECTED]: { text: 'Connected', style: 'pill-ok', button: 'Go to WhatsApp' },
 };
 
 const DETAIL_TEXT = {
   [CONN.NO_TAB]: 'No WhatsApp Web tab is open.',
   [CONN.NEEDS_RELOAD]: 'Reload WhatsApp Web once so the extension can attach.',
+  [CONN.ASLEEP]: 'Chrome put the WhatsApp tab to sleep. Reload it to reconnect.',
   [CONN.LOADING]: 'WhatsApp Web is starting…',
   [CONN.LOGGED_OUT]: 'Scan the QR code in WhatsApp Web to log in.',
 };
@@ -51,6 +53,7 @@ let current = { state: null, tabId: null };
 async function fetchStatus() {
   const tab = await findWhatsAppTab();
   if (!tab) return { state: CONN.NO_TAB, tabId: null };
+  if (tab.discarded) return { state: CONN.ASLEEP, tabId: tab.id };
   try {
     const res = await chrome.tabs.sendMessage(tab.id, { type: MSG.GET_STATUS });
     return { ...res, tabId: tab.id };
@@ -88,12 +91,23 @@ async function refreshStatus() {
   renderStatus(current);
 }
 
+/** States where the extension can't reach WhatsApp until the tab reloads. */
+const RELOAD_STATES = new Set([CONN.NEEDS_RELOAD, CONN.ASLEEP, CONN.ENGINE_ERROR]);
+
 async function onWhatsAppButton() {
-  if (current.state === CONN.NEEDS_RELOAD && current.tabId != null) {
-    await chrome.tabs.reload(current.tabId);
+  const button = document.getElementById('wa-button');
+  const reload = RELOAD_STATES.has(current.state);
+  button.disabled = true;
+  button.textContent = reload ? 'Reloading…' : 'Opening…';
+  try {
+    await showWhatsApp({ reload });
+  } catch (err) {
+    log('WhatsApp button failed', err);
+    document.getElementById('status-detail').textContent = `Could not open WhatsApp: ${err.message}`;
+  } finally {
+    button.disabled = false;
+    setTimeout(refreshStatus, 1_500);
   }
-  await chrome.runtime.sendMessage({ type: MSG.OPEN_WHATSAPP });
-  setTimeout(refreshStatus, 1_000);
 }
 
 /* ---------- Init ---------- */

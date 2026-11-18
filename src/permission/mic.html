@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Allow microphone</title>
+  <style>
+    :root { color-scheme: light dark; --bg: #ffffff; --text: #111b21; --muted: #667781; --ok: #008069; --err: #a1261c; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111b21; --text: #e9edef; --muted: #8696a0; --ok: #00a884; --err: #ffb3ab; } }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 460px; margin: 12vh auto 0; padding: 0 16px; text-align: center; }
+    h1 { font-size: 20px; margin: 0 0 8px; }
+    p { margin: 8px 0; color: var(--muted); }
+    .ok { color: var(--ok); }
+    .err { color: var(--err); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>🎙 WhatsApp Bulk Sender</h1>
+    <p id="status">Click <b>Allow</b> in the box Chrome shows, so you can record voice notes.</p>
+  </main>
+  <script src="mic.js"></script>
+</body>
+</html>

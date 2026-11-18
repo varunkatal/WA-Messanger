@@ -4,9 +4,10 @@
  * and "Send test to myself".
  */
 import { MSG } from '../shared/messages.js';
-import { CAMPAIGN_DEFAULTS, MEDIA_LIMITS, MEDIA_MIME, log } from '../shared/config.js';
+import { CAMPAIGN_DEFAULTS, MEDIA_LIMITS, MEDIA_MIME, VOICE_NOTE, log } from '../shared/config.js';
 import { KEYS, getLocal, setLocal, putMedia, getMedia, deleteMedia, hasMediaData, putMediaData, removeMediaData } from '../shared/storage.js';
 import { buildParts, findVariables, renderTemplate } from '../shared/template.js';
+import { webmToOgg } from '../shared/webm-to-ogg.js';
 import { getRecipients } from './recipients.js';
 import { sendToWhatsApp } from './whatsapp.js';
 
@@ -18,6 +19,7 @@ import { sendToWhatsApp } from './whatsapp.js';
  * @property {number} size
  * @property {'image'|'video'|'audio'|'document'} type
  * @property {string} caption
+ * @property {boolean} [ptt]  recorded here; sent as a WhatsApp voice note
  */
 
 /** @type {{text: string, textAsCaption: boolean, attachments: Attachment[]}} */
@@ -218,9 +220,10 @@ function onTemplateDelete() {
  * @returns {'image'|'video'|'audio'|'document'}
  */
 function mediaKind(mime) {
-  if (MEDIA_MIME.image.includes(mime)) return 'image';
-  if (MEDIA_MIME.video.includes(mime)) return 'video';
-  if (MEDIA_MIME.audio.includes(mime)) return 'audio';
+  const base = mime.split(';')[0].trim().toLowerCase(); // "audio/ogg; codecs=opus" → "audio/ogg"
+  if (MEDIA_MIME.image.includes(base)) return 'image';
+  if (MEDIA_MIME.video.includes(base)) return 'video';
+  if (MEDIA_MIME.audio.includes(base)) return 'audio';
   return 'document';
 }
 
@@ -230,6 +233,15 @@ const formatSize = (bytes) =>
 async function onFilesChosen(event) {
   const files = [...(event.target.files || [])];
   event.target.value = '';
+  await addFiles(files);
+}
+
+/**
+ * Stores files in IndexedDB and adds them to the message (picked files and recordings).
+ * @param {File[]} files
+ * @param {{ptt?: boolean}} [extra] fields added to each attachment
+ */
+async function addFiles(files, extra = {}) {
   const errors = [];
   for (const file of files) {
     const mime = file.type || 'application/octet-stream';
@@ -245,14 +257,98 @@ async function onFilesChosen(event) {
       errors.push(`Could not store "${file.name}": ${err.message}`);
       continue;
     }
-    draft.attachments.push({ id, name: file.name, mime, size: file.size, type, caption: '' });
+    draft.attachments.push({ id, name: file.name, mime, size: file.size, type, caption: '', ...extra });
   }
-  const errEl = $('att-error');
-  errEl.textContent = errors.join(' ');
-  errEl.hidden = errors.length === 0;
+  showAttError(errors.join(' '));
   saveDraft();
   renderAttachments();
   renderPreview();
+}
+
+function showAttError(text) {
+  const errEl = $('att-error');
+  errEl.textContent = text;
+  errEl.hidden = !text;
+}
+
+/* ---------- Voice note recording ---------- */
+
+/** @type {{recorder: MediaRecorder, stream: MediaStream, chunks: Blob[], startedAt: number, timer: number, cancelled: boolean} | null} */
+let recording = null;
+
+const formatClock = (sec) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`;
+
+function renderRecordingUi() {
+  const on = recording != null;
+  $('rec-start').hidden = on;
+  $('rec-bar').hidden = !on;
+  $('att-add').disabled = on;
+  if (on) $('rec-time').textContent = formatClock((Date.now() - recording.startedAt) / 1000);
+}
+
+/**
+ * Starts recording from the microphone. The side panel can't show Chrome's
+ * "Allow microphone" prompt, so the first time we open a small extension page
+ * in a tab that asks; after that the side panel is allowed too.
+ */
+async function startRecording() {
+  showAttError('');
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    if (err.name === 'NotAllowedError') {
+      chrome.tabs.create({ url: chrome.runtime.getURL('src/permission/mic.html') });
+      showAttError('Allow the microphone in the tab that just opened, then tap 🎙 again.');
+    } else if (err.name === 'NotFoundError') {
+      showAttError('No microphone found.');
+    } else {
+      showAttError(`Could not start the microphone: ${err.message}`);
+    }
+    return;
+  }
+  const recorder = new MediaRecorder(stream, { mimeType: VOICE_NOTE.recorderMime });
+  recording = { recorder, stream, chunks: [], startedAt: Date.now(), timer: 0, cancelled: false };
+  const rec = recording;
+  recorder.ondataavailable = (e) => { if (e.data.size) rec.chunks.push(e.data); };
+  recorder.onstop = () => finishRecording(rec);
+  recorder.start(1000);
+  rec.timer = setInterval(() => {
+    if ((Date.now() - rec.startedAt) / 1000 >= VOICE_NOTE.maxSec) stopRecording(false);
+    else renderRecordingUi();
+  }, 250);
+  renderRecordingUi();
+}
+
+/** @param {boolean} cancel true to throw the recording away */
+function stopRecording(cancel) {
+  if (!recording) return;
+  recording.cancelled = cancel;
+  clearInterval(recording.timer);
+  if (recording.recorder.state !== 'inactive') recording.recorder.stop(); // → finishRecording
+}
+
+/** Turns the finished WebM recording into an OGG voice note and attaches it. */
+async function finishRecording(rec) {
+  rec.stream.getTracks().forEach((t) => t.stop()); // mic light off
+  recording = null;
+  renderRecordingUi();
+  if (rec.cancelled) return;
+  try {
+    const ogg = webmToOgg(await new Blob(rec.chunks).arrayBuffer());
+    // Make sure it really plays before it can be sent to anyone.
+    const ctx = new AudioContext();
+    try {
+      await ctx.decodeAudioData(ogg.slice().buffer);
+    } finally {
+      ctx.close();
+    }
+    const stamp = new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false }).replace(/[,:]/g, (c) => (c === ':' ? '.' : ''));
+    await addFiles([new File([ogg], `Voice note ${stamp}.ogg`, { type: 'audio/ogg; codecs=opus' })], { ptt: true }); // WhatsApp's own voice-note type
+  } catch (err) {
+    log('voice note failed', err);
+    showAttError(`Could not save the recording: ${err.message}`);
+  }
 }
 
 async function removeAttachment(id) {
@@ -277,7 +373,7 @@ function moveAttachment(index, delta) {
 
 const ICONS = { image: '🖼', video: '🎬', audio: '🎵', document: '📄' };
 
-/** Thumbnail for images, an icon for videos and documents. */
+/** Thumbnail for images, an icon for everything else. */
 async function thumbFor(a) {
   if (a.type === 'image') {
     if (!thumbUrls.has(a.id)) {
@@ -298,6 +394,20 @@ async function thumbFor(a) {
   return icon;
 }
 
+/** A small player so an audio attachment can be checked before sending. */
+async function audioPlayer(a) {
+  if (!thumbUrls.has(a.id)) {
+    const rec = await getMedia(a.id).catch(() => null);
+    if (rec) thumbUrls.set(a.id, URL.createObjectURL(rec.blob));
+  }
+  const audio = document.createElement('audio');
+  audio.className = 'att-audio';
+  audio.controls = true;
+  audio.preload = 'metadata';
+  if (thumbUrls.has(a.id)) audio.src = thumbUrls.get(a.id);
+  return audio;
+}
+
 async function renderAttachments() {
   const rows = await Promise.all(
     draft.attachments.map(async (a, i) => {
@@ -311,7 +421,7 @@ async function renderAttachments() {
       name.textContent = a.name;
       const meta = document.createElement('small');
       meta.className = 'muted';
-      meta.textContent = `${a.type} · ${formatSize(a.size)}`;
+      meta.textContent = `${a.ptt ? 'voice note' : a.type} · ${formatSize(a.size)}`;
       const caption = document.createElement('textarea');
       caption.rows = 2;
       caption.className = 'caption';
@@ -331,8 +441,8 @@ async function renderAttachments() {
         // WhatsApp shows no caption under audio, so don't offer one.
         const note = document.createElement('small');
         note.className = 'muted';
-        note.textContent = 'Audio is sent without a caption.';
-        info.append(name, meta, note);
+        note.textContent = a.ptt ? 'Sent as a voice note (no caption).' : 'Audio is sent without a caption.';
+        info.append(name, meta, await audioPlayer(a), note);
       } else {
         head.append(meta, makeFormatBar(caption));
         info.append(name, head, caption);
@@ -523,6 +633,9 @@ export async function initComposer() {
   $('tpl-delete').addEventListener('click', onTemplateDelete);
   $('att-add').addEventListener('click', () => $('att-file').click());
   $('att-file').addEventListener('change', onFilesChosen);
+  $('rec-start').addEventListener('click', startRecording);
+  $('rec-stop').addEventListener('click', () => stopRecording(false));
+  $('rec-cancel').addEventListener('click', () => stopRecording(true));
   $('msg-as-caption').addEventListener('change', (e) => {
     draft.textAsCaption = e.target.checked;
     saveDraft();
